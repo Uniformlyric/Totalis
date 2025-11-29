@@ -1,0 +1,46 @@
+---
+import BaseLayout from './BaseLayout.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<BaseLayout title={title} description={description}>
+  <div id="app-root">
+    <slot />
+  </div>
+</BaseLayout>
+
+<script>
+  // Initialize theme from localStorage or system preference
+  function initTheme() {
+    const savedTheme = localStorage.getItem('totalis-theme');
+    if (savedTheme === 'sunset') {
+      document.documentElement.setAttribute('data-theme', 'sunset');
+    } else if (savedTheme === 'system') {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (!prefersDark) {
+        document.documentElement.setAttribute('data-theme', 'sunset');
+      }
+    }
+    // Default is celestial (dark), which is the default CSS
+  }
+  
+  initTheme();
+  
+  // Listen for system theme changes
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+    const savedTheme = localStorage.getItem('totalis-theme');
+    if (savedTheme === 'system') {
+      if (e.matches) {
+        document.documentElement.removeAttribute('data-theme');
+      } else {
+        document.documentElement.setAttribute('data-theme', 'sunset');
+      }
+    }
+  });
+</script>

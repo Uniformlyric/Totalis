@@ -1,0 +1,29 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import { MainLayout } from '../components/layout/MainLayout';
+---
+
+<AppLayout title="Analytics">
+  <MainLayout client:load>
+    <div class="space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-2xl font-bold text-text">Analytics</h1>
+          <p class="text-text-secondary mt-1">Track your productivity trends</p>
+        </div>
+      </div>
+      
+      <div class="bg-surface rounded-xl border border-border p-8 text-center">
+        <div class="w-16 h-16 bg-surface-hover rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted">
+            <line x1="18" y1="20" x2="18" y2="10" />
+            <line x1="12" y1="20" x2="12" y2="4" />
+            <line x1="6" y1="20" x2="6" y2="14" />
+          </svg>
+        </div>
+        <h2 class="text-lg font-semibold text-text">Analytics View</h2>
+        <p class="text-text-secondary mt-2">Productivity analytics coming in Phase 7</p>
+      </div>
+    </div>
+  </MainLayout>
+</AppLayout>

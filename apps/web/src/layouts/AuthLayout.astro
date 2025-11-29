@@ -1,0 +1,32 @@
+---
+import BaseLayout from './BaseLayout.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<BaseLayout title={title} description={description}>
+  <div class="min-h-screen flex items-center justify-center p-4">
+    <slot />
+  </div>
+</BaseLayout>
+
+<script>
+  // Initialize theme
+  function initTheme() {
+    const savedTheme = localStorage.getItem('totalis-theme');
+    if (savedTheme === 'sunset') {
+      document.documentElement.setAttribute('data-theme', 'sunset');
+    } else if (savedTheme === 'system') {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (!prefersDark) {
+        document.documentElement.setAttribute('data-theme', 'sunset');
+      }
+    }
+  }
+  initTheme();
+</script>
