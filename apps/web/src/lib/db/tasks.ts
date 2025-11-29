@@ -1,0 +1,147 @@
+import {
+  collection,
+  doc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  Timestamp,
+  onSnapshot,
+  type Unsubscribe,
+} from 'firebase/firestore';
+import { getDb, getAuthInstance } from '../firebase';
+import type { Task } from '@totalis/shared';
+
+const getTasksCollection = (userId: string) => {
+  const db = getDb();
+  return collection(db, 'users', userId, 'tasks');
+};
+
+export async function createTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+  const auth = getAuthInstance();
+  const userId = auth.currentUser?.uid;
+  if (!userId) throw new Error('Not authenticated');
+
+  const tasksCol = getTasksCollection(userId);
+  const now = Timestamp.now();
+
+  const docRef = await addDoc(tasksCol, {
+    ...task,
+    userId,
+    syncStatus: 'synced',
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return docRef.id;
+}
+
+export async function updateTask(taskId: string, updates: Partial<Task>): Promise<void> {
+  const auth = getAuthInstance();
+  const userId = auth.currentUser?.uid;
+  if (!userId) throw new Error('Not authenticated');
+
+  const taskRef = doc(getDb(), 'users', userId, 'tasks', taskId);
+  await updateDoc(taskRef, {
+    ...updates,
+    updatedAt: Timestamp.now(),
+  });
+}
+
+export async function deleteTask(taskId: string): Promise<void> {
+  const auth = getAuthInstance();
+  const userId = auth.currentUser?.uid;
+  if (!userId) throw new Error('Not authenticated');
+
+  const taskRef = doc(getDb(), 'users', userId, 'tasks', taskId);
+  await deleteDoc(taskRef);
+}
+
+export async function getTask(taskId: string): Promise<Task | null> {
+  const auth = getAuthInstance();
+  const userId = auth.currentUser?.uid;
+  if (!userId) throw new Error('Not authenticated');
+
+  const taskRef = doc(getDb(), 'users', userId, 'tasks', taskId);
+  const snapshot = await getDoc(taskRef);
+
+  if (!snapshot.exists()) return null;
+  return { id: snapshot.id, ...snapshot.data() } as Task;
+}
+
+export async function getTasks(filters?: {
+  status?: Task['status'];
+  projectId?: string;
+  dueDate?: Date;
+}): Promise<Task[]> {
+  const auth = getAuthInstance();
+  const userId = auth.currentUser?.uid;
+  if (!userId) throw new Error('Not authenticated');
+
+  const tasksCol = getTasksCollection(userId);
+  let q = query(tasksCol, orderBy('createdAt', 'desc'));
+
+  if (filters?.status) {
+    q = query(q, where('status', '==', filters.status));
+  }
+  if (filters?.projectId) {
+    q = query(q, where('projectId', '==', filters.projectId));
+  }
+
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Task));
+}
+
+export function subscribeToTasks(
+  callback: (tasks: Task[]) => void,
+  filters?: { status?: Task['status']; projectId?: string }
+): Unsubscribe {
+  const auth = getAuthInstance();
+  const userId = auth.currentUser?.uid;
+  if (!userId) throw new Error('Not authenticated');
+
+  const tasksCol = getTasksCollection(userId);
+  let q = query(tasksCol, orderBy('createdAt', 'desc'));
+
+  if (filters?.status) {
+    q = query(q, where('status', '==', filters.status));
+  }
+
+  return onSnapshot(q, (snapshot) => {
+    const tasks = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Task));
+    callback(tasks);
+  });
+}
+
+export async function getTodayTasks(): Promise<Task[]> {
+  const auth = getAuthInstance();
+  const userId = auth.currentUser?.uid;
+  if (!userId) throw new Error('Not authenticated');
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const tasksCol = getTasksCollection(userId);
+  const q = query(
+    tasksCol,
+    where('scheduledStart', '>=', Timestamp.fromDate(today)),
+    where('scheduledStart', '<', Timestamp.fromDate(tomorrow)),
+    orderBy('scheduledStart', 'asc')
+  );
+
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Task));
+}
+
+export async function completeTask(taskId: string): Promise<void> {
+  await updateTask(taskId, {
+    status: 'completed',
+    completedAt: new Date(),
+  });
+}
