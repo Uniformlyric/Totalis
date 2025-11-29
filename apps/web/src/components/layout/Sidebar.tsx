@@ -1,3 +1,5 @@
+import { useState, useEffect } from 'react';
+
 interface NavItem {
   name: string;
   href: string;
@@ -113,7 +115,12 @@ interface SidebarProps {
 }
 
 export function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: SidebarProps) {
-  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/';
+  // Use state to avoid hydration mismatch
+  const [currentPath, setCurrentPath] = useState('/');
+  
+  useEffect(() => {
+    setCurrentPath(window.location.pathname);
+  }, []);
 
   const isActive = (href: string) => {
     if (href === '/') return currentPath === '/';

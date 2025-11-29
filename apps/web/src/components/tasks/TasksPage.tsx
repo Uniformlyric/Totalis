@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { TaskList, TaskModal, QuickAddTask, FloatingAddButton, CompletionCelebration } from '@/components/tasks';
 import type { Task } from '@totalis/shared';
+import type { User } from 'firebase/auth';
 
 export function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -9,9 +10,41 @@ export function TasksPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
 
-  // Load tasks
+  // Check authentication first
   useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const { getAuthInstance } = await import('@/lib/firebase');
+        const { onAuthStateChanged } = await import('firebase/auth');
+        const auth = getAuthInstance();
+        
+        const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+          setUser(firebaseUser);
+          setAuthChecked(true);
+          
+          if (!firebaseUser) {
+            // Redirect to login if not authenticated
+            window.location.href = '/login';
+          }
+        });
+
+        return () => unsubscribe();
+      } catch (err) {
+        console.error('Auth check failed:', err);
+        setAuthChecked(true);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  // Load tasks only after auth is confirmed
+  useEffect(() => {
+    if (!authChecked || !user) return;
+
     let unsubscribe: (() => void) | undefined;
 
     const loadTasks = async () => {
@@ -34,7 +67,7 @@ export function TasksPage() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, []);
+  }, [authChecked, user]);
 
   // Create task
   const handleCreateTask = useCallback(async (taskData: Partial<Task>) => {
@@ -145,6 +178,27 @@ export function TasksPage() {
           </svg>
         </div>
         <p className="text-text-secondary">{error}</p>
+      </div>
+    );
+  }
+
+  // Show loading while checking auth
+  if (!authChecked) {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[50vh]">
+        <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  // Redirect happens in useEffect, show loading while redirecting
+  if (!user) {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[50vh]">
+        <div className="text-center">
+          <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+          <p className="text-text-muted">Redirecting to login...</p>
+        </div>
       </div>
     );
   }

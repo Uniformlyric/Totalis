@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button, Checkbox } from '@/components/ui';
 import { CompletionCelebration } from '@/components/tasks';
 import type { Task, Habit } from '@totalis/shared';
+import type { User } from 'firebase/auth';
 
 interface StatsCardProps {
   title: string;
@@ -133,20 +134,47 @@ export function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [showCelebration, setShowCelebration] = useState(false);
   const [userName, setUserName] = useState('');
+  const [user, setUser] = useState<User | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
 
-  // Load tasks and user
+  // Check authentication first
   useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const { getAuthInstance } = await import('@/lib/firebase');
+        const { onAuthStateChanged } = await import('firebase/auth');
+        const auth = getAuthInstance();
+        
+        const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+          setUser(firebaseUser);
+          setAuthChecked(true);
+          
+          if (firebaseUser) {
+            setUserName(firebaseUser.displayName?.split(' ')[0] || '');
+          } else {
+            // Redirect to login if not authenticated
+            window.location.href = '/login';
+          }
+        });
+
+        return () => unsubscribe();
+      } catch (err) {
+        console.error('Auth check failed:', err);
+        setAuthChecked(true);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  // Load tasks only after auth is confirmed
+  useEffect(() => {
+    if (!authChecked || !user) return;
+
     let unsubscribe: (() => void) | undefined;
 
     const loadData = async () => {
       try {
-        // Get user name
-        const { getAuthInstance } = await import('@/lib/firebase');
-        const auth = getAuthInstance();
-        if (auth.currentUser) {
-          setUserName(auth.currentUser.displayName?.split(' ')[0] || '');
-        }
-
         // Subscribe to tasks
         const { subscribeToTasks } = await import('@/lib/db/tasks');
         unsubscribe = subscribeToTasks((updatedTasks) => {
@@ -164,7 +192,7 @@ export function Dashboard() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, []);
+  }, [authChecked, user]);
 
   // Toggle task completion
   const handleToggleTask = async (taskId: string, completed: boolean) => {
@@ -235,6 +263,27 @@ export function Dashboard() {
     if (hour < 17) return 'Good afternoon';
     return 'Good evening';
   };
+
+  // Show loading while checking auth
+  if (!authChecked) {
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  // Redirect happens in useEffect, show loading while redirecting
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="text-center">
+          <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+          <p className="text-text-muted">Redirecting to login...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

@@ -21,6 +21,13 @@ const getTasksCollection = (userId: string) => {
   return collection(db, 'users', userId, 'tasks');
 };
 
+// Helper to remove undefined values from an object
+function removeUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([_, v]) => v !== undefined)
+  ) as Partial<T>;
+}
+
 export async function createTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
   const auth = getAuthInstance();
   const userId = auth.currentUser?.uid;
@@ -29,8 +36,11 @@ export async function createTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedA
   const tasksCol = getTasksCollection(userId);
   const now = Timestamp.now();
 
+  // Remove undefined values - Firestore doesn't accept them
+  const cleanTask = removeUndefined(task);
+
   const docRef = await addDoc(tasksCol, {
-    ...task,
+    ...cleanTask,
     userId,
     syncStatus: 'synced',
     createdAt: now,
@@ -46,8 +56,12 @@ export async function updateTask(taskId: string, updates: Partial<Task>): Promis
   if (!userId) throw new Error('Not authenticated');
 
   const taskRef = doc(getDb(), 'users', userId, 'tasks', taskId);
+  
+  // Remove undefined values - Firestore doesn't accept them
+  const cleanUpdates = removeUndefined(updates);
+  
   await updateDoc(taskRef, {
-    ...updates,
+    ...cleanUpdates,
     updatedAt: Timestamp.now(),
   });
 }
