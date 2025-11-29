@@ -1,11 +1,12 @@
 import { useState } from 'react';
 
-interface CheckboxProps {
+export interface CheckboxProps {
   checked?: boolean;
   onChange?: (checked: boolean) => void;
   label?: string;
   disabled?: boolean;
   size?: 'sm' | 'md' | 'lg';
+  className?: string;
 }
 
 const sizeStyles = {
@@ -26,6 +27,7 @@ export function Checkbox({
   label,
   disabled = false,
   size = 'md',
+  className = '',
 }: CheckboxProps) {
   const [isAnimating, setIsAnimating] = useState(false);
 
@@ -59,6 +61,7 @@ export function Checkbox({
               : 'border-border hover:border-text-muted'
           }
           ${isAnimating ? 'animate-check-bounce' : ''}
+          ${className}
         `}
       >
         {checked && (

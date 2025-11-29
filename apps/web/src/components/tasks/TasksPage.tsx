@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { TaskList, TaskModal, QuickAddTask, FloatingAddButton, CompletionCelebration } from '@/components/tasks';
-import type { Task } from '@totalis/shared';
+import type { Task, Project } from '@totalis/shared';
 import type { User } from 'firebase/auth';
 
 export function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -45,15 +46,21 @@ export function TasksPage() {
   useEffect(() => {
     if (!authChecked || !user) return;
 
-    let unsubscribe: (() => void) | undefined;
+    let unsubscribeTasks: (() => void) | undefined;
+    let unsubscribeProjects: (() => void) | undefined;
 
-    const loadTasks = async () => {
+    const loadData = async () => {
       try {
         const { subscribeToTasks } = await import('@/lib/db/tasks');
+        const { subscribeToProjects } = await import('@/lib/db/projects');
         
-        unsubscribe = subscribeToTasks((updatedTasks) => {
+        unsubscribeTasks = subscribeToTasks((updatedTasks) => {
           setTasks(updatedTasks);
           setIsLoading(false);
+        });
+
+        unsubscribeProjects = subscribeToProjects(user.uid, (updatedProjects) => {
+          setProjects(updatedProjects);
         });
       } catch (err) {
         console.error('Failed to load tasks:', err);
@@ -62,10 +69,11 @@ export function TasksPage() {
       }
     };
 
-    loadTasks();
+    loadData();
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      if (unsubscribeTasks) unsubscribeTasks();
+      if (unsubscribeProjects) unsubscribeProjects();
     };
   }, [authChecked, user]);
 
@@ -228,6 +236,7 @@ export function TasksPage() {
       {/* Task List */}
       <TaskList
         tasks={tasks}
+        projects={projects}
         onToggleTask={handleToggleTask}
         onSelectTask={handleSelectTask}
         isLoading={isLoading}
@@ -241,6 +250,7 @@ export function TasksPage() {
         onClose={handleCloseModal}
         onSave={selectedTask ? handleUpdateTask : handleCreateTask}
         onDelete={handleDeleteTask}
+        projects={projects}
         mode={selectedTask ? 'edit' : 'create'}
       />
 

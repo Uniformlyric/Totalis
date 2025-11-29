@@ -1,27 +1,11 @@
 ---
 import AppLayout from '../layouts/AppLayout.astro';
 import { MainLayout } from '../components/layout/MainLayout';
+import { ProjectsPage } from '../components/projects';
 ---
 
 <AppLayout title="Projects">
   <MainLayout client:load>
-    <div class="space-y-6">
-      <div class="flex items-center justify-between">
-        <div>
-          <h1 class="text-2xl font-bold text-text">Projects</h1>
-          <p class="text-text-secondary mt-1">Organize your work into projects</p>
-        </div>
-      </div>
-      
-      <div class="bg-surface rounded-xl border border-border p-8 text-center">
-        <div class="w-16 h-16 bg-surface-hover rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-          </svg>
-        </div>
-        <h2 class="text-lg font-semibold text-text">Projects View</h2>
-        <p class="text-text-secondary mt-2">Project management coming soon</p>
-      </div>
-    </div>
+    <ProjectsPage client:load />
   </MainLayout>
 </AppLayout>

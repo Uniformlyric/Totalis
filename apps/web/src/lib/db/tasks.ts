@@ -28,7 +28,7 @@ function removeUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
   ) as Partial<T>;
 }
 
-export async function createTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+export async function createTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'syncStatus'>): Promise<string> {
   const auth = getAuthInstance();
   const userId = auth.currentUser?.uid;
   if (!userId) throw new Error('Not authenticated');

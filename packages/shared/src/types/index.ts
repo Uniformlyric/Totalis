@@ -46,8 +46,13 @@ export interface Goal {
   title: string;
   description?: string;
   deadline?: Date;
-  status: 'active' | 'completed' | 'archived';
+  status: 'active' | 'completed' | 'archived' | 'blocked';
   progress: number;
+  timeframe: 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom';
+  targetValue?: number;
+  currentValue?: number;
+  unit?: string;
+  icon?: string;
   tags: string[];
   color: string;
   createdAt: Date;
@@ -62,12 +67,14 @@ export interface Project {
   description?: string;
   status: 'active' | 'completed' | 'archived' | 'blocked';
   progress: number;
+  taskCount: number;
+  completedTaskCount: number;
   startDate?: Date;
   deadline?: Date;
   estimatedHours: number;
   actualHours: number;
   tags: string[];
-  color: string;
+  color?: string;
   createdAt: Date;
   updatedAt: Date;
 }

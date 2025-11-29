@@ -1,10 +1,11 @@
 import { useState, useMemo } from 'react';
 import { TaskItem } from './TaskItem';
 import { Input, Button } from '@/components/ui';
-import type { Task } from '@totalis/shared';
+import type { Task, Project } from '@totalis/shared';
 
 interface TaskListProps {
   tasks: Task[];
+  projects?: Project[];
   onToggleTask: (taskId: string, completed: boolean) => void;
   onSelectTask: (task: Task) => void;
   isLoading?: boolean;
@@ -26,6 +27,7 @@ const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
 
 export function TaskList({
   tasks,
+  projects = [],
   onToggleTask,
   onSelectTask,
   isLoading = false,
@@ -235,6 +237,7 @@ export function TaskList({
             <TaskItem
               key={task.id}
               task={task}
+              project={projects.find((p) => p.id === task.projectId)}
               onToggle={onToggleTask}
               onClick={onSelectTask}
             />

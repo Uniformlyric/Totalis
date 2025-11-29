@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { Badge, Checkbox } from '@/components/ui';
-import type { Task } from '@totalis/shared';
+import type { Task, Project } from '@totalis/shared';
 
 interface TaskItemProps {
   task: Task;
   onToggle: (taskId: string, completed: boolean) => void;
   onClick: (task: Task) => void;
+  project?: Project;
   showProject?: boolean;
 }
 
@@ -23,7 +24,7 @@ const statusConfig = {
   blocked: { color: 'danger', label: 'Blocked' },
 } as const;
 
-export function TaskItem({ task, onToggle, onClick, showProject = true }: TaskItemProps) {
+export function TaskItem({ task, onToggle, onClick, project, showProject = true }: TaskItemProps) {
   const [isCompleting, setIsCompleting] = useState(false);
   const isCompleted = task.status === 'completed';
   
@@ -139,6 +140,17 @@ export function TaskItem({ task, onToggle, onClick, showProject = true }: TaskIt
               </svg>
               {task.tags.slice(0, 2).join(', ')}
               {task.tags.length > 2 && ` +${task.tags.length - 2}`}
+            </span>
+          )}
+
+          {/* Project */}
+          {showProject && project && (
+            <span className="flex items-center gap-1.5">
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: project.color || '#6366f1' }}
+              />
+              <span className="truncate max-w-[100px]">{project.title}</span>
             </span>
           )}
         </div>

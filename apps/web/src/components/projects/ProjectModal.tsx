@@ -1,77 +1,83 @@
 import { useState, useEffect } from 'react';
 import { Modal, Button, Input, Textarea, Badge } from '@/components/ui';
-import type { Task, Project } from '@totalis/shared';
+import type { Project, Goal } from '@totalis/shared';
 
-interface TaskModalProps {
-  task: Task | null;
+interface ProjectModalProps {
+  project: Project | null;
   isOpen: boolean;
   onClose: () => void;
-  onSave: (task: Partial<Task>) => Promise<void>;
-  onDelete?: (taskId: string) => Promise<void>;
-  projects?: Project[];
+  onSave: (project: Partial<Project>) => Promise<void>;
+  onDelete?: (projectId: string) => Promise<void>;
+  goals?: Goal[];
   mode?: 'create' | 'edit';
 }
 
-const priorityOptions: { value: Task['priority']; label: string; color: string }[] = [
-  { value: 'low', label: 'Low', color: 'bg-text-muted' },
-  { value: 'medium', label: 'Medium', color: 'bg-primary' },
-  { value: 'high', label: 'High', color: 'bg-warning' },
-  { value: 'urgent', label: 'Urgent', color: 'bg-danger' },
-];
-
-const statusOptions: { value: Task['status']; label: string }[] = [
-  { value: 'pending', label: 'To Do' },
-  { value: 'in_progress', label: 'In Progress' },
+const statusOptions: { value: Project['status']; label: string }[] = [
+  { value: 'active', label: 'Active' },
   { value: 'completed', label: 'Completed' },
   { value: 'blocked', label: 'Blocked' },
+  { value: 'archived', label: 'Archived' },
 ];
 
-export function TaskModal({
-  task,
+const colorOptions = [
+  '#6366f1', // Indigo
+  '#8b5cf6', // Purple
+  '#ec4899', // Pink
+  '#ef4444', // Red
+  '#f97316', // Orange
+  '#eab308', // Yellow
+  '#22c55e', // Green
+  '#14b8a6', // Teal
+  '#06b6d4', // Cyan
+  '#3b82f6', // Blue
+];
+
+export function ProjectModal({
+  project,
   isOpen,
   onClose,
   onSave,
   onDelete,
-  projects = [],
+  goals = [],
   mode = 'edit',
-}: TaskModalProps) {
+}: ProjectModalProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<Task['priority']>('medium');
-  const [status, setStatus] = useState<Task['status']>('pending');
-  const [projectId, setProjectId] = useState<string>('');
-  const [dueDate, setDueDate] = useState('');
-  const [estimatedMinutes, setEstimatedMinutes] = useState(30);
+  const [status, setStatus] = useState<Project['status']>('active');
+  const [color, setColor] = useState(colorOptions[0]);
+  const [goalId, setGoalId] = useState<string>('');
+  const [deadline, setDeadline] = useState('');
+  const [estimatedHours, setEstimatedHours] = useState(0);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // Reset form when task changes
+  // Reset form when project changes
   useEffect(() => {
-    if (task) {
-      setTitle(task.title);
-      setDescription(task.description || '');
-      setPriority(task.priority);
-      setStatus(task.status);
-      setProjectId(task.projectId || '');
-      setDueDate(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '');
-      setEstimatedMinutes(task.estimatedMinutes);
-      setTags(task.tags);
+    if (project) {
+      setTitle(project.title);
+      setDescription(project.description || '');
+      setStatus(project.status);
+      setColor(project.color || colorOptions[0]);
+      setGoalId(project.goalId || '');
+      setDeadline(project.deadline ? new Date(project.deadline).toISOString().split('T')[0] : '');
+      setEstimatedHours(project.estimatedHours || 0);
+      setTags(project.tags || []);
     } else {
-      // Reset for new task
+      // Reset for new project
       setTitle('');
       setDescription('');
-      setPriority('medium');
-      setStatus('pending');
-      setProjectId('');
-      setDueDate('');
-      setEstimatedMinutes(30);
+      setStatus('active');
+      setColor(colorOptions[0]);
+      setGoalId('');
+      setDeadline('');
+      setEstimatedHours(0);
       setTags([]);
     }
     setShowDeleteConfirm(false);
-  }, [task, isOpen]);
+  }, [project, isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,34 +86,33 @@ export function TaskModal({
     setIsSaving(true);
     try {
       await onSave({
-        ...(task?.id ? { id: task.id } : {}),
+        ...(project?.id ? { id: project.id } : {}),
         title: title.trim(),
         description: description.trim() || undefined,
-        priority,
         status,
-        projectId: projectId || undefined,
-        dueDate: dueDate ? new Date(dueDate) : undefined,
-        estimatedMinutes,
-        estimatedSource: 'manual',
+        color,
+        goalId: goalId || undefined,
+        deadline: deadline ? new Date(deadline) : undefined,
+        estimatedHours,
         tags,
       });
       onClose();
     } catch (error) {
-      console.error('Failed to save task:', error);
+      console.error('Failed to save project:', error);
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!task?.id || !onDelete) return;
+    if (!project?.id || !onDelete) return;
 
     setIsDeleting(true);
     try {
-      await onDelete(task.id);
+      await onDelete(project.id);
       onClose();
     } catch (error) {
-      console.error('Failed to delete task:', error);
+      console.error('Failed to delete project:', error);
     } finally {
       setIsDeleting(false);
     }
@@ -129,14 +134,14 @@ export function TaskModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={mode === 'create' ? 'Create Task' : 'Edit Task'}
+      title={mode === 'create' ? 'Create Project' : 'Edit Project'}
       size="lg"
     >
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* Title */}
         <Input
-          label="Title"
-          placeholder="What needs to be done?"
+          label="Project Name"
+          placeholder="My awesome project"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           required
@@ -146,42 +151,38 @@ export function TaskModal({
         {/* Description */}
         <Textarea
           label="Description"
-          placeholder="Add more details..."
+          placeholder="What is this project about?"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={3}
         />
 
-        {/* Priority and Status */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-text mb-2">Priority</label>
-            <div className="flex gap-2">
-              {priorityOptions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setPriority(option.value)}
-                  className={`
-                    flex-1 py-2 px-3 text-sm rounded-lg border transition-all
-                    ${priority === option.value
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-surface text-text-muted hover:border-primary/30'
-                    }
-                  `}
-                >
-                  <span className={`inline-block w-2 h-2 rounded-full ${option.color} mr-1.5`} />
-                  {option.label}
-                </button>
-              ))}
-            </div>
+        {/* Color picker */}
+        <div>
+          <label className="block text-sm font-medium text-text mb-2">Color</label>
+          <div className="flex gap-2 flex-wrap">
+            {colorOptions.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setColor(c)}
+                className={`
+                  w-8 h-8 rounded-lg transition-all
+                  ${color === c ? 'ring-2 ring-offset-2 ring-offset-surface ring-primary scale-110' : 'hover:scale-105'}
+                `}
+                style={{ backgroundColor: c }}
+              />
+            ))}
           </div>
+        </div>
 
+        {/* Status and Goal */}
+        <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-text mb-2">Status</label>
             <select
               value={status}
-              onChange={(e) => setStatus(e.target.value as Task['status'])}
+              onChange={(e) => setStatus(e.target.value as Project['status'])}
               className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
             >
               {statusOptions.map((option) => (
@@ -191,59 +192,48 @@ export function TaskModal({
               ))}
             </select>
           </div>
-        </div>
 
-        {/* Project Selection */}
-        {projects.length > 0 && (
           <div>
-            <label className="block text-sm font-medium text-text mb-2">Project</label>
+            <label className="block text-sm font-medium text-text mb-2">Linked Goal</label>
             <select
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
+              value={goalId}
+              onChange={(e) => setGoalId(e.target.value)}
               className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
             >
-              <option value="">No project</option>
-              {projects.filter(p => p.status === 'active').map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.title}
+              <option value="">No goal</option>
+              {goals.map((goal) => (
+                <option key={goal.id} value={goal.id}>
+                  {goal.title}
                 </option>
               ))}
             </select>
           </div>
-        )}
+        </div>
 
-        {/* Due Date and Estimated Time */}
+        {/* Deadline and Estimated Hours */}
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-text mb-2">Due Date</label>
+            <label className="block text-sm font-medium text-text mb-2">Deadline</label>
             <input
               type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
               className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-text mb-2">
-              Estimated Time (minutes)
+              Estimated Hours
             </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min="5"
-                max="480"
-                step="5"
-                value={estimatedMinutes}
-                onChange={(e) => setEstimatedMinutes(parseInt(e.target.value))}
-                className="flex-1 accent-primary"
-              />
-              <span className="text-sm text-text-muted w-16 text-right">
-                {estimatedMinutes < 60
-                  ? `${estimatedMinutes}m`
-                  : `${Math.floor(estimatedMinutes / 60)}h ${estimatedMinutes % 60}m`}
-              </span>
-            </div>
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              value={estimatedHours}
+              onChange={(e) => setEstimatedHours(parseFloat(e.target.value) || 0)}
+              className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+            />
           </div>
         </div>
 
@@ -287,10 +277,10 @@ export function TaskModal({
         </div>
 
         {/* Delete Confirmation */}
-        {showDeleteConfirm && onDelete && task?.id && (
+        {showDeleteConfirm && onDelete && project?.id && (
           <div className="p-4 bg-danger/10 border border-danger/20 rounded-lg">
             <p className="text-sm text-danger mb-3">
-              Are you sure you want to delete this task? This action cannot be undone.
+              Are you sure you want to delete this project? Tasks linked to this project will be unlinked.
             </p>
             <div className="flex gap-2">
               <Button
@@ -317,7 +307,7 @@ export function TaskModal({
         {/* Actions */}
         <div className="flex items-center justify-between pt-4 border-t border-border">
           <div>
-            {mode === 'edit' && onDelete && task?.id && !showDeleteConfirm && (
+            {mode === 'edit' && onDelete && project?.id && !showDeleteConfirm && (
               <Button
                 type="button"
                 variant="ghost"
@@ -337,7 +327,7 @@ export function TaskModal({
               Cancel
             </Button>
             <Button type="submit" isLoading={isSaving}>
-              {mode === 'create' ? 'Create Task' : 'Save Changes'}
+              {mode === 'create' ? 'Create Project' : 'Save Changes'}
             </Button>
           </div>
         </div>

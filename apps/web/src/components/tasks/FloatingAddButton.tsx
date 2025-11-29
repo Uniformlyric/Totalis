@@ -4,17 +4,27 @@ import { TaskModal } from './TaskModal';
 import type { Task } from '@totalis/shared';
 
 interface FloatingAddButtonProps {
-  onAdd: (task: Partial<Task>) => Promise<void>;
+  onAdd?: (task: Partial<Task>) => Promise<void>;
+  onClick?: () => void;
+  label?: string;
 }
 
-export function FloatingAddButton({ onAdd }: FloatingAddButtonProps) {
+export function FloatingAddButton({ onAdd, onClick, label = 'New Task' }: FloatingAddButtonProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const handleClick = () => {
+    if (onClick) {
+      onClick();
+    } else {
+      setIsModalOpen(true);
+    }
+  };
 
   return (
     <>
       {/* Floating Action Button */}
       <button
-        onClick={() => setIsModalOpen(true)}
+        onClick={handleClick}
         className="
           fixed bottom-6 right-6 z-40
           w-14 h-14 rounded-full
@@ -25,7 +35,7 @@ export function FloatingAddButton({ onAdd }: FloatingAddButtonProps) {
           transition-transform
           md:hidden
         "
-        aria-label="Add new task"
+        aria-label={`Add new ${label.toLowerCase()}`}
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="12" y1="5" x2="12" y2="19" />
@@ -35,7 +45,7 @@ export function FloatingAddButton({ onAdd }: FloatingAddButtonProps) {
 
       {/* Desktop Add Button (in header area) */}
       <Button
-        onClick={() => setIsModalOpen(true)}
+        onClick={handleClick}
         className="hidden md:flex"
         leftIcon={
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -44,17 +54,19 @@ export function FloatingAddButton({ onAdd }: FloatingAddButtonProps) {
           </svg>
         }
       >
-        New Task
+        {label}
       </Button>
 
-      {/* Task Creation Modal */}
-      <TaskModal
-        task={null}
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onSave={onAdd}
-        mode="create"
-      />
+      {/* Task Creation Modal - only used when onAdd is provided */}
+      {onAdd && (
+        <TaskModal
+          task={null}
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          onSave={onAdd}
+          mode="create"
+        />
+      )}
     </>
   );
 }
