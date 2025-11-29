@@ -4,11 +4,15 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
+  signInWithPopup,
+  GoogleAuthProvider,
   type User,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, Timestamp } from 'firebase/firestore';
 import { getAuthInstance, getDb } from '@/lib/firebase';
 import type { User as TotalisUser, UserSettings } from '@totalis/shared';
+
+const googleProvider = new GoogleAuthProvider();
 
 const defaultSettings: UserSettings = {
   theme: 'celestial',
@@ -84,6 +88,34 @@ export function useAuth() {
     return firebaseSignOut(auth);
   };
 
+  const signInWithGoogle = async () => {
+    const auth = getAuthInstance();
+    const db = getDb();
+    
+    const result = await signInWithPopup(auth, googleProvider);
+    const firebaseUser = result.user;
+    
+    // Check if user document exists, create if not
+    const userRef = doc(db, 'users', firebaseUser.uid);
+    const userSnap = await getDoc(userRef);
+    
+    if (!userSnap.exists()) {
+      const now = Timestamp.now();
+      await setDoc(userRef, {
+        email: firebaseUser.email,
+        displayName: firebaseUser.displayName || 'User',
+        photoURL: firebaseUser.photoURL,
+        fcmTokens: [],
+        webPushSubscriptions: [],
+        settings: defaultSettings,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    
+    return result;
+  };
+
   return {
     user,
     totalisUser,
@@ -91,6 +123,7 @@ export function useAuth() {
     signIn,
     signUp,
     signOut,
+    signInWithGoogle,
     isAuthenticated: !!user,
   };
 }

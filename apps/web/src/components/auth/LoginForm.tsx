@@ -5,6 +5,7 @@ export function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -122,6 +123,66 @@ export function LoginForm() {
           type="button"
           variant="secondary"
           className="w-full"
+          isLoading={isGoogleLoading}
+          onClick={async () => {
+            setIsGoogleLoading(true);
+            setError('');
+            try {
+              const { getAuthInstance } = await import('@/lib/firebase');
+              const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
+              const { doc, setDoc, getDoc, Timestamp } = await import('firebase/firestore');
+              const { getDb } = await import('@/lib/firebase');
+              
+              const auth = getAuthInstance();
+              const provider = new GoogleAuthProvider();
+              const result = await signInWithPopup(auth, provider);
+              
+              // Check if user document exists, create if not
+              const db = getDb();
+              const userRef = doc(db, 'users', result.user.uid);
+              const userSnap = await getDoc(userRef);
+              
+              if (!userSnap.exists()) {
+                const now = Timestamp.now();
+                await setDoc(userRef, {
+                  email: result.user.email,
+                  displayName: result.user.displayName || 'User',
+                  photoURL: result.user.photoURL,
+                  fcmTokens: [],
+                  webPushSubscriptions: [],
+                  settings: {
+                    theme: 'celestial',
+                    notifications: {
+                      morningSummary: { enabled: true, time: '08:00' },
+                      eveningRecap: { enabled: true, time: '21:00' },
+                      urgentReminders: true,
+                      gentleReminders: true,
+                      emailNotifications: true,
+                      pushNotifications: true,
+                    },
+                    workingHours: { start: '09:00', end: '17:00' },
+                    weeklyCapacity: 40,
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                  },
+                  createdAt: now,
+                  updatedAt: now,
+                });
+              }
+              
+              window.location.href = '/';
+            } catch (err: any) {
+              console.error('Google sign-in error:', err);
+              if (err.code === 'auth/popup-closed-by-user') {
+                // User closed the popup, don't show error
+              } else if (err.code === 'auth/popup-blocked') {
+                setError('Popup was blocked. Please allow popups for this site.');
+              } else {
+                setError('Failed to sign in with Google. Please try again.');
+              }
+            } finally {
+              setIsGoogleLoading(false);
+            }
+          }}
           leftIcon={
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
