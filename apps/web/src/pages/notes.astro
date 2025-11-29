@@ -1,0 +1,11 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import { MainLayout } from '../components/layout/MainLayout';
+import { NotesPage } from '../components/notes';
+---
+
+<AppLayout title="Notes">
+  <MainLayout client:load>
+    <NotesPage client:load />
+  </MainLayout>
+</AppLayout>
