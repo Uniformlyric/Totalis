@@ -1,0 +1,22 @@
+{
+  "name": "totalis",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Total clarity. Total control. Total productivity.",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "web": "npm run dev --workspace=apps/web",
+    "web:build": "npm run build --workspace=apps/web",
+    "web:deploy": "npm run deploy --workspace=apps/web",
+    "firebase:deploy": "firebase deploy",
+    "firebase:rules": "firebase deploy --only firestore:rules",
+    "generate:vapid": "node scripts/generate-vapid-keys.js",
+    "lint": "npm run lint --workspaces --if-present",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "^3.2.0",
+    "typescript": "^5.3.0",
+    "firebase-tools": "^13.0.0"
+  }
+}

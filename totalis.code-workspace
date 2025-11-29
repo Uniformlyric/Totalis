@@ -1,0 +1,27 @@
+{
+  "folders": [
+    { "path": "apps/web", "name": "🌐 Web (Astro)" },
+    { "path": "apps/mobile", "name": "📱 Mobile (Flutter)" },
+    { "path": "packages/shared", "name": "📦 Shared" },
+    { "path": "firebase", "name": "🔥 Firebase" },
+    { "path": ".", "name": "📁 Root" }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/node_modules": true,
+      "**/.dart_tool": true,
+      "**/build": true,
+      "**/.astro": true
+    },
+    "editor.formatOnSave": true
+  },
+  "extensions": {
+    "recommendations": [
+      "astro-build.astro-vscode",
+      "dart-code.flutter",
+      "bradlc.vscode-tailwindcss",
+      "esbenp.prettier-vscode",
+      "github.copilot"
+    ]
+  }
+}

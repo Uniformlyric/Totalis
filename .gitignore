@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+.astro/
+.env
+.env.local
+.firebase/
+.dart_tool/
+.packages
+.pub-cache/
+android/.gradle/
+ios/Pods/
+.wrangler/
+.dev.vars
+*.log
+.DS_Store
+coverage/
