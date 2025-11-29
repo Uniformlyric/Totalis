@@ -1,28 +1,11 @@
 ---
 import AppLayout from '../layouts/AppLayout.astro';
 import { MainLayout } from '../components/layout/MainLayout';
+import { TasksPage } from '../components/tasks';
 ---
 
 <AppLayout title="Tasks">
   <MainLayout client:load>
-    <div class="space-y-6">
-      <div class="flex items-center justify-between">
-        <div>
-          <h1 class="text-2xl font-bold text-text">Tasks</h1>
-          <p class="text-text-secondary mt-1">Manage your tasks and stay organized</p>
-        </div>
-      </div>
-      
-      <div class="bg-surface rounded-xl border border-border p-8 text-center">
-        <div class="w-16 h-16 bg-surface-hover rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted">
-            <path d="M9 11l3 3L22 4" />
-            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-          </svg>
-        </div>
-        <h2 class="text-lg font-semibold text-text">Tasks View</h2>
-        <p class="text-text-secondary mt-2">Full task management coming in Phase 2</p>
-      </div>
-    </div>
+    <TasksPage client:load />
   </MainLayout>
 </AppLayout>

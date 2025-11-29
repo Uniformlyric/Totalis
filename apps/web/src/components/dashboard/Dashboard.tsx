@@ -1,4 +1,6 @@
-import { Card, CardHeader, CardTitle, CardContent, Badge, Button } from '@/components/ui';
+import { useState, useEffect } from 'react';
+import { Card, CardHeader, CardTitle, CardContent, Badge, Button, Checkbox } from '@/components/ui';
+import { CompletionCelebration } from '@/components/tasks';
 import type { Task, Habit } from '@totalis/shared';
 
 interface StatsCardProps {
@@ -7,15 +9,20 @@ interface StatsCardProps {
   subtitle?: string;
   icon: React.ReactNode;
   trend?: { value: number; isPositive: boolean };
+  isLoading?: boolean;
 }
 
-function StatsCard({ title, value, subtitle, icon, trend }: StatsCardProps) {
+function StatsCard({ title, value, subtitle, icon, trend, isLoading }: StatsCardProps) {
   return (
     <Card variant="bordered" className="animate-fade-in">
       <div className="flex items-start justify-between">
         <div>
           <p className="text-sm text-text-secondary">{title}</p>
-          <p className="text-2xl font-bold text-text mt-1">{value}</p>
+          {isLoading ? (
+            <div className="h-8 w-16 bg-border animate-pulse rounded mt-1" />
+          ) : (
+            <p className="text-2xl font-bold text-text mt-1">{value}</p>
+          )}
           {subtitle && (
             <p className="text-xs text-text-muted mt-1">{subtitle}</p>
           )}
@@ -34,18 +41,12 @@ function StatsCard({ title, value, subtitle, icon, trend }: StatsCardProps) {
   );
 }
 
-interface TaskItemProps {
-  task: {
-    id: string;
-    title: string;
-    priority: 'low' | 'medium' | 'high' | 'urgent';
-    estimatedMinutes: number;
-    projectName?: string;
-  };
-  onComplete?: () => void;
+interface DashboardTaskItemProps {
+  task: Task;
+  onComplete: (taskId: string, completed: boolean) => void;
 }
 
-function TaskItem({ task, onComplete }: TaskItemProps) {
+function DashboardTaskItem({ task, onComplete }: DashboardTaskItemProps) {
   const priorityColors = {
     low: 'bg-text-muted',
     medium: 'bg-primary',
@@ -53,29 +54,36 @@ function TaskItem({ task, onComplete }: TaskItemProps) {
     urgent: 'bg-danger',
   };
 
+  const isCompleted = task.status === 'completed';
+
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg hover:bg-surface-hover transition-colors group">
-      <button
-        onClick={onComplete}
-        className="w-5 h-5 rounded-full border-2 border-border hover:border-primary transition-colors flex-shrink-0"
+      <Checkbox
+        checked={isCompleted}
+        onChange={(checked) => onComplete(task.id, checked)}
       />
       <div className="flex-1 min-w-0">
-        <p className="text-text font-medium truncate">{task.title}</p>
+        <p className={`font-medium truncate ${isCompleted ? 'text-text-muted line-through' : 'text-text'}`}>
+          {task.title}
+        </p>
         <div className="flex items-center gap-2 mt-1">
           <span className={`w-2 h-2 rounded-full ${priorityColors[task.priority]}`} />
           <span className="text-xs text-text-muted">{task.estimatedMinutes}m</span>
-          {task.projectName && (
-            <span className="text-xs text-text-muted">• {task.projectName}</span>
+          {task.dueDate && (
+            <span className="text-xs text-text-muted">
+              • Due {new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </span>
           )}
         </div>
       </div>
-      <button className="opacity-0 group-hover:opacity-100 p-1 text-text-muted hover:text-text transition-opacity">
+      <a
+        href="/tasks"
+        className="opacity-0 group-hover:opacity-100 p-1 text-text-muted hover:text-text transition-opacity"
+      >
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="1" />
-          <circle cx="19" cy="12" r="1" />
-          <circle cx="5" cy="12" r="1" />
+          <path d="M5 12h14M12 5l7 7-7 7"/>
         </svg>
-      </button>
+      </a>
     </div>
   );
 }
@@ -121,23 +129,99 @@ function HabitItem({ habit, onToggle }: HabitItemProps) {
 }
 
 export function Dashboard() {
-  // Mock data - will be replaced with real data from hooks
-  const stats = {
-    tasksCompleted: 12,
-    tasksTotal: 18,
-    focusMinutes: 245,
-    productivityScore: 85,
-    habitsCompleted: 4,
-    habitsTotal: 5,
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [userName, setUserName] = useState('');
+
+  // Load tasks and user
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+
+    const loadData = async () => {
+      try {
+        // Get user name
+        const { getAuthInstance } = await import('@/lib/firebase');
+        const auth = getAuthInstance();
+        if (auth.currentUser) {
+          setUserName(auth.currentUser.displayName?.split(' ')[0] || '');
+        }
+
+        // Subscribe to tasks
+        const { subscribeToTasks } = await import('@/lib/db/tasks');
+        unsubscribe = subscribeToTasks((updatedTasks) => {
+          setTasks(updatedTasks);
+          setIsLoading(false);
+        });
+      } catch (err) {
+        console.error('Failed to load dashboard data:', err);
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  // Toggle task completion
+  const handleToggleTask = async (taskId: string, completed: boolean) => {
+    try {
+      const { updateTask } = await import('@/lib/db/tasks');
+      
+      if (completed) {
+        await updateTask(taskId, {
+          status: 'completed',
+          completedAt: new Date(),
+        });
+        setShowCelebration(true);
+      } else {
+        await updateTask(taskId, {
+          status: 'pending',
+          completedAt: undefined,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to toggle task:', err);
+    }
   };
 
-  const todayTasks = [
-    { id: '1', title: 'Review project proposal', priority: 'high' as const, estimatedMinutes: 30, projectName: 'Client A' },
-    { id: '2', title: 'Update documentation', priority: 'medium' as const, estimatedMinutes: 45 },
-    { id: '3', title: 'Team standup meeting', priority: 'medium' as const, estimatedMinutes: 15 },
-    { id: '4', title: 'Code review', priority: 'urgent' as const, estimatedMinutes: 60, projectName: 'Main App' },
-  ];
+  // Calculate stats
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const todayTasks = tasks.filter(t => {
+    if (t.dueDate) {
+      const due = new Date(t.dueDate);
+      due.setHours(0, 0, 0, 0);
+      return due.getTime() === today.getTime();
+    }
+    // Also show pending tasks with no due date
+    return t.status !== 'completed';
+  }).slice(0, 5);
 
+  const completedToday = tasks.filter(t => {
+    if (!t.completedAt) return false;
+    const completed = new Date(t.completedAt);
+    completed.setHours(0, 0, 0, 0);
+    return completed.getTime() === today.getTime();
+  }).length;
+
+  const totalToday = tasks.filter(t => {
+    if (t.dueDate) {
+      const due = new Date(t.dueDate);
+      due.setHours(0, 0, 0, 0);
+      return due.getTime() === today.getTime();
+    }
+    return false;
+  }).length || 1;
+
+  const pendingTasks = tasks.filter(t => t.status !== 'completed').length;
+  const completionRate = Math.round((completedToday / Math.max(totalToday, 1)) * 100);
+
+  // Mock habits (will be real in Habits phase)
   const habits = [
     { id: '1', title: 'Morning meditation', currentStreak: 14, completed: true, color: '#6366f1' },
     { id: '2', title: 'Exercise', currentStreak: 7, completed: true, color: '#22c55e' },
@@ -157,30 +241,37 @@ export function Dashboard() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-text">{greeting()}! 👋</h1>
+          <h1 className="text-2xl font-bold text-text">
+            {greeting()}{userName ? `, ${userName}` : ''}! 👋
+          </h1>
           <p className="text-text-secondary mt-1">
-            You have {stats.tasksTotal - stats.tasksCompleted} tasks remaining today
+            {pendingTasks === 0 
+              ? "You're all caught up! Time to relax or add new tasks."
+              : `You have ${pendingTasks} task${pendingTasks === 1 ? '' : 's'} to complete`
+            }
           </p>
         </div>
-        <Button
-          leftIcon={
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          }
-        >
-          Add Task
-        </Button>
+        <a href="/tasks">
+          <Button
+            leftIcon={
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            }
+          >
+            Add Task
+          </Button>
+        </a>
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatsCard
           title="Tasks Completed"
-          value={`${stats.tasksCompleted}/${stats.tasksTotal}`}
-          subtitle={`${Math.round((stats.tasksCompleted / stats.tasksTotal) * 100)}% completion rate`}
-          trend={{ value: 12, isPositive: true }}
+          value={`${completedToday}/${totalToday}`}
+          subtitle={`${completionRate}% completion rate`}
+          isLoading={isLoading}
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 11l3 3L22 4" />
@@ -189,10 +280,10 @@ export function Dashboard() {
           }
         />
         <StatsCard
-          title="Focus Time"
-          value={`${Math.floor(stats.focusMinutes / 60)}h ${stats.focusMinutes % 60}m`}
-          subtitle="Total focused work today"
-          trend={{ value: 8, isPositive: true }}
+          title="Pending Tasks"
+          value={pendingTasks}
+          subtitle="Across all projects"
+          isLoading={isLoading}
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" />
@@ -201,10 +292,10 @@ export function Dashboard() {
           }
         />
         <StatsCard
-          title="Productivity Score"
-          value={`${stats.productivityScore}%`}
-          subtitle="Based on completion & focus"
-          trend={{ value: 5, isPositive: true }}
+          title="Total Tasks"
+          value={tasks.length}
+          subtitle="In your workspace"
+          isLoading={isLoading}
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="20" x2="18" y2="10" />
@@ -215,7 +306,7 @@ export function Dashboard() {
         />
         <StatsCard
           title="Habits"
-          value={`${stats.habitsCompleted}/${stats.habitsTotal}`}
+          value={`${habits.filter(h => h.completed).length}/${habits.length}`}
           subtitle="Keep the streak going!"
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -230,17 +321,48 @@ export function Dashboard() {
         {/* Today's Tasks */}
         <Card variant="bordered" padding="none" className="lg:col-span-2">
           <CardHeader className="px-4 pt-4">
-            <CardTitle>Today's Tasks</CardTitle>
+            <CardTitle>Your Tasks</CardTitle>
             <a href="/tasks" className="text-sm text-primary hover:underline">
               View all
             </a>
           </CardHeader>
           <CardContent className="pb-2">
-            <div className="divide-y divide-border">
-              {todayTasks.map((task) => (
-                <TaskItem key={task.id} task={task} />
-              ))}
-            </div>
+            {isLoading ? (
+              <div className="space-y-3 p-3">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="animate-pulse flex items-center gap-3">
+                    <div className="w-5 h-5 rounded-full bg-border" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-4 bg-border rounded w-3/4" />
+                      <div className="h-3 bg-border rounded w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : todayTasks.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-surface-hover flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-muted">
+                    <path d="M9 11l3 3L22 4" />
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                  </svg>
+                </div>
+                <p className="text-text-muted">No tasks yet</p>
+                <a href="/tasks" className="text-sm text-primary hover:underline mt-2 inline-block">
+                  Create your first task
+                </a>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {todayTasks.map((task) => (
+                  <DashboardTaskItem
+                    key={task.id}
+                    task={task}
+                    onComplete={handleToggleTask}
+                  />
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -262,29 +384,31 @@ export function Dashboard() {
         </Card>
       </div>
 
-      {/* AI Insights */}
+      {/* Quick Tip */}
       <Card variant="bordered" className="border-l-4 border-l-accent">
         <div className="flex items-start gap-4">
           <div className="p-2 bg-accent/10 text-accent rounded-lg">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2a10 10 0 1 0 10 10H12V2z" />
-              <path d="M12 2a10 10 0 0 1 10 10" />
-              <path d="M12 12l8 4" />
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="16" x2="12" y2="12" />
+              <line x1="12" y1="8" x2="12.01" y2="8" />
             </svg>
           </div>
           <div className="flex-1">
-            <h3 className="font-semibold text-text">AI Insight</h3>
+            <h3 className="font-semibold text-text">Quick Tip</h3>
             <p className="text-text-secondary mt-1">
-              You're most productive between 9-11 AM. Consider scheduling your high-priority tasks during this window. 
-              Your "Code review" task might take longer than estimated based on similar past tasks.
+              Press <kbd className="px-1.5 py-0.5 bg-surface-hover rounded text-xs font-mono">Ctrl</kbd> + <kbd className="px-1.5 py-0.5 bg-surface-hover rounded text-xs font-mono">K</kbd> to quickly search and navigate. 
+              Try adding tasks with priorities to help focus on what matters most!
             </p>
-            <div className="flex gap-2 mt-3">
-              <Button size="sm" variant="secondary">Reschedule Tasks</Button>
-              <Button size="sm" variant="ghost">Dismiss</Button>
-            </div>
           </div>
         </div>
       </Card>
+
+      {/* Completion Celebration */}
+      <CompletionCelebration
+        isActive={showCelebration}
+        onComplete={() => setShowCelebration(false)}
+      />
     </div>
   );
 }
