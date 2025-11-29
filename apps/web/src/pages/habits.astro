@@ -1,27 +1,11 @@
 ---
 import AppLayout from '../layouts/AppLayout.astro';
 import { MainLayout } from '../components/layout/MainLayout';
+import { HabitsPage } from '../components/habits';
 ---
 
 <AppLayout title="Habits">
   <MainLayout client:load>
-    <div class="space-y-6">
-      <div class="flex items-center justify-between">
-        <div>
-          <h1 class="text-2xl font-bold text-text">Habits</h1>
-          <p class="text-text-secondary mt-1">Build and maintain daily habits</p>
-        </div>
-      </div>
-      
-      <div class="bg-surface rounded-xl border border-border p-8 text-center">
-        <div class="w-16 h-16 bg-surface-hover rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted">
-            <path d="M12 20v-6M6 20V10M18 20V4" />
-          </svg>
-        </div>
-        <h2 class="text-lg font-semibold text-text">Habits View</h2>
-        <p class="text-text-secondary mt-2">Habit tracking coming in Phase 6</p>
-      </div>
-    </div>
+    <HabitsPage client:load />
   </MainLayout>
 </AppLayout>
