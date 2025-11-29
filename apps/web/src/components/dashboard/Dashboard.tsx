@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button, Checkbox } from '@/components/ui';
 import { CompletionCelebration } from '@/components/tasks';
-import type { Task, Habit } from '@totalis/shared';
+import type { Task, Habit, HabitLog, Project, Goal } from '@totalis/shared';
 import type { User } from 'firebase/auth';
 
 interface StatsCardProps {
@@ -129,8 +129,20 @@ function HabitItem({ habit, onToggle }: HabitItemProps) {
   );
 }
 
+interface DashboardHabit {
+  id: string;
+  title: string;
+  currentStreak: number;
+  completed: boolean;
+  color: string;
+}
+
 export function Dashboard() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [habitLogs, setHabitLogs] = useState<Map<string, HabitLog>>(new Map());
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [goals, setGoals] = useState<Goal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showCelebration, setShowCelebration] = useState(false);
   const [userName, setUserName] = useState('');
@@ -167,20 +179,50 @@ export function Dashboard() {
     checkAuth();
   }, []);
 
-  // Load tasks only after auth is confirmed
+  // Load all data after auth is confirmed
   useEffect(() => {
     if (!authChecked || !user) return;
 
-    let unsubscribe: (() => void) | undefined;
+    const unsubscribes: (() => void)[] = [];
 
     const loadData = async () => {
       try {
         // Subscribe to tasks
         const { subscribeToTasks } = await import('@/lib/db/tasks');
-        unsubscribe = subscribeToTasks((updatedTasks) => {
+        const unsubTasks = subscribeToTasks((updatedTasks) => {
           setTasks(updatedTasks);
           setIsLoading(false);
         });
+        unsubscribes.push(unsubTasks);
+
+        // Subscribe to habits
+        const { subscribeToHabits } = await import('@/lib/db/habits');
+        const unsubHabits = subscribeToHabits(user.uid, (updatedHabits) => {
+          setHabits(updatedHabits);
+        });
+        unsubscribes.push(unsubHabits);
+
+        // Load today's habit logs
+        const { getAllLogsForDate, getDateString } = await import('@/lib/db/habitLogs');
+        const today = getDateString();
+        const logs = await getAllLogsForDate(today);
+        const logsMap = new Map<string, HabitLog>();
+        logs.forEach(log => logsMap.set(log.habitId, log));
+        setHabitLogs(logsMap);
+
+        // Subscribe to projects
+        const { subscribeToProjects } = await import('@/lib/db/projects');
+        const unsubProjects = subscribeToProjects(user.uid, (updatedProjects) => {
+          setProjects(updatedProjects);
+        });
+        unsubscribes.push(unsubProjects);
+
+        // Subscribe to goals
+        const { subscribeToGoals } = await import('@/lib/db/goals');
+        const unsubGoals = subscribeToGoals(user.uid, (updatedGoals) => {
+          setGoals(updatedGoals);
+        });
+        unsubscribes.push(unsubGoals);
       } catch (err) {
         console.error('Failed to load dashboard data:', err);
         setIsLoading(false);
@@ -190,7 +232,7 @@ export function Dashboard() {
     loadData();
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      unsubscribes.forEach(unsub => unsub());
     };
   }, [authChecked, user]);
 
@@ -213,6 +255,27 @@ export function Dashboard() {
       }
     } catch (err) {
       console.error('Failed to toggle task:', err);
+    }
+  };
+
+  // Toggle habit completion
+  const handleToggleHabit = async (habitId: string) => {
+    if (!user) return;
+    
+    try {
+      const { toggleHabitCompletion, getDateString } = await import('@/lib/db/habitLogs');
+      const today = getDateString();
+      
+      await toggleHabitCompletion(habitId, today);
+      
+      // Refresh today's logs
+      const { getAllLogsForDate } = await import('@/lib/db/habitLogs');
+      const logs = await getAllLogsForDate(today);
+      const logsMap = new Map<string, HabitLog>();
+      logs.forEach(log => logsMap.set(log.habitId, log));
+      setHabitLogs(logsMap);
+    } catch (err) {
+      console.error('Failed to toggle habit:', err);
     }
   };
 
@@ -249,13 +312,23 @@ export function Dashboard() {
   const pendingTasks = tasks.filter(t => t.status !== 'completed').length;
   const completionRate = Math.round((completedToday / Math.max(totalToday, 1)) * 100);
 
-  // Mock habits (will be real in Habits phase)
-  const habits = [
-    { id: '1', title: 'Morning meditation', currentStreak: 14, completed: true, color: '#6366f1' },
-    { id: '2', title: 'Exercise', currentStreak: 7, completed: true, color: '#22c55e' },
-    { id: '3', title: 'Read 30 minutes', currentStreak: 3, completed: false, color: '#f59e0b' },
-    { id: '4', title: 'Journal', currentStreak: 21, completed: true, color: '#8b5cf6' },
-  ];
+  // Transform habits to display format with completion status from habitLogs
+  const displayHabits: DashboardHabit[] = habits.map(habit => ({
+    id: habit.id,
+    title: habit.title,
+    currentStreak: habit.currentStreak,
+    completed: habitLogs.get(habit.id)?.completed ?? false,
+    color: habit.color,
+  }));
+
+  // Calculate completed habits count
+  const completedHabitsCount = displayHabits.filter(h => h.completed).length;
+
+  // Calculate active goals (not completed)
+  const activeGoals = goals.filter(g => g.status !== 'completed');
+
+  // Calculate active projects
+  const activeProjects = projects.filter(p => p.status !== 'completed');
 
   const greeting = () => {
     const hour = new Date().getHours();
@@ -331,7 +404,7 @@ export function Dashboard() {
         <StatsCard
           title="Pending Tasks"
           value={pendingTasks}
-          subtitle="Across all projects"
+          subtitle={`${activeProjects.length} active project${activeProjects.length !== 1 ? 's' : ''}`}
           isLoading={isLoading}
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -341,21 +414,21 @@ export function Dashboard() {
           }
         />
         <StatsCard
-          title="Total Tasks"
-          value={tasks.length}
-          subtitle="In your workspace"
+          title="Active Goals"
+          value={activeGoals.length}
+          subtitle={goals.filter(g => g.status === 'completed').length > 0 ? `${goals.filter(g => g.status === 'completed').length} completed` : 'Set ambitious goals!'}
           isLoading={isLoading}
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="20" x2="18" y2="10" />
-              <line x1="12" y1="20" x2="12" y2="4" />
-              <line x1="6" y1="20" x2="6" y2="14" />
+              <circle cx="12" cy="12" r="10" />
+              <circle cx="12" cy="12" r="6" />
+              <circle cx="12" cy="12" r="2" />
             </svg>
           }
         />
         <StatsCard
           title="Habits"
-          value={`${habits.filter(h => h.completed).length}/${habits.length}`}
+          value={`${completedHabitsCount}/${displayHabits.length}`}
           subtitle="Keep the streak going!"
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -424,14 +497,152 @@ export function Dashboard() {
             </a>
           </CardHeader>
           <CardContent className="pb-2">
-            <div className="divide-y divide-border">
-              {habits.map((habit) => (
-                <HabitItem key={habit.id} habit={habit} />
-              ))}
-            </div>
+            {displayHabits.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-surface-hover flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-muted">
+                    <path d="M12 20v-6M6 20V10M18 20V4" />
+                  </svg>
+                </div>
+                <p className="text-text-muted">No habits yet</p>
+                <a href="/habits" className="text-sm text-primary hover:underline mt-2 inline-block">
+                  Create your first habit
+                </a>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {displayHabits.map((habit) => (
+                  <HabitItem 
+                    key={habit.id} 
+                    habit={habit} 
+                    onToggle={() => handleToggleHabit(habit.id)}
+                  />
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      {/* Goals & Projects Section */}
+      {(activeGoals.length > 0 || activeProjects.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Active Goals */}
+          <Card variant="bordered" padding="none">
+            <CardHeader className="px-4 pt-4">
+              <CardTitle>Active Goals</CardTitle>
+              <a href="/goals" className="text-sm text-primary hover:underline">
+                View all
+              </a>
+            </CardHeader>
+            <CardContent className="pb-2">
+              {activeGoals.length === 0 ? (
+                <div className="text-center py-6">
+                  <p className="text-text-muted text-sm">No active goals</p>
+                  <a href="/goals" className="text-sm text-primary hover:underline mt-1 inline-block">
+                    Create a goal
+                  </a>
+                </div>
+              ) : (
+                <div className="space-y-3 p-2">
+                  {activeGoals.slice(0, 3).map((goal) => {
+                    // Calculate progress from linked projects
+                    const linkedProjects = projects.filter(p => p.goalId === goal.id);
+                    const progress = linkedProjects.length > 0 
+                      ? Math.round(linkedProjects.reduce((acc, p) => acc + (p.progress || 0), 0) / linkedProjects.length)
+                      : goal.progress;
+                    return (
+                      <a
+                        key={goal.id}
+                        href={`/goals?id=${goal.id}`}
+                        className="block p-3 rounded-lg hover:bg-surface-hover transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div 
+                            className="w-3 h-3 rounded-full" 
+                            style={{ backgroundColor: goal.color }}
+                          />
+                          <span className="font-medium text-text flex-1 truncate">{goal.title}</span>
+                          <Badge variant="secondary">{progress}%</Badge>
+                        </div>
+                        <div className="mt-2 h-1.5 bg-border rounded-full overflow-hidden">
+                          <div 
+                            className="h-full rounded-full transition-all duration-500"
+                            style={{ 
+                              width: `${progress}%`,
+                              backgroundColor: goal.color 
+                            }}
+                          />
+                        </div>
+                        {goal.deadline && (
+                          <p className="text-xs text-text-muted mt-2">
+                            Target: {new Date(goal.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </p>
+                        )}
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Active Projects */}
+          <Card variant="bordered" padding="none">
+            <CardHeader className="px-4 pt-4">
+              <CardTitle>Active Projects</CardTitle>
+              <a href="/projects" className="text-sm text-primary hover:underline">
+                View all
+              </a>
+            </CardHeader>
+            <CardContent className="pb-2">
+              {activeProjects.length === 0 ? (
+                <div className="text-center py-6">
+                  <p className="text-text-muted text-sm">No active projects</p>
+                  <a href="/projects" className="text-sm text-primary hover:underline mt-1 inline-block">
+                    Create a project
+                  </a>
+                </div>
+              ) : (
+                <div className="space-y-3 p-2">
+                  {activeProjects.slice(0, 3).map((project) => {
+                    const progress = project.taskCount 
+                      ? Math.round((project.completedTaskCount / project.taskCount) * 100) 
+                      : 0;
+                    return (
+                      <a
+                        key={project.id}
+                        href={`/projects?id=${project.id}`}
+                        className="block p-3 rounded-lg hover:bg-surface-hover transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div 
+                            className="w-3 h-3 rounded-full" 
+                            style={{ backgroundColor: project.color }}
+                          />
+                          <span className="font-medium text-text flex-1 truncate">{project.title}</span>
+                          <span className="text-xs text-text-muted">
+                            {project.completedTaskCount || 0}/{project.taskCount || 0} tasks
+                          </span>
+                        </div>
+                        <div className="mt-2 h-1.5 bg-border rounded-full overflow-hidden">
+                          <div 
+                            className="h-full rounded-full transition-all duration-500"
+                            style={{ 
+                              width: `${progress}%`,
+                              backgroundColor: project.color 
+                            }}
+                          />
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Quick Tip */}
       <Card variant="bordered" className="border-l-4 border-l-accent">
