@@ -72,8 +72,15 @@ export function CalendarView({
       // Get tasks for this day
       const dayTasks = tasks.filter((task) => {
         if (!task.dueDate) return false;
-        const taskDate = new Date(task.dueDate).toISOString().split('T')[0];
-        return taskDate === dateString;
+        try {
+          const taskDate = task.dueDate instanceof Date 
+            ? task.dueDate 
+            : new Date(task.dueDate);
+          if (isNaN(taskDate.getTime())) return false;
+          return taskDate.toISOString().split('T')[0] === dateString;
+        } catch {
+          return false;
+        }
       });
 
       // Get habit completions for this day
