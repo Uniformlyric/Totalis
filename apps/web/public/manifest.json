@@ -4,9 +4,9 @@
   "description": "Total clarity. Total control. Total productivity.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0e17",
+  "background_color": "#0a0b0f",
   "theme_color": "#6366f1",
-  "orientation": "portrait-primary",
+  "orientation": "any",
   "icons": [
     {
       "src": "/icons/icon-192.png",
@@ -24,18 +24,33 @@
   "categories": ["productivity", "utilities"],
   "shortcuts": [
     {
-      "name": "Add Task",
-      "short_name": "Add Task",
+      "name": "New Task",
+      "short_name": "Task",
       "description": "Create a new task",
-      "url": "/tasks?action=new",
+      "url": "/tasks?new=true",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Focus Mode",
+      "short_name": "Focus",
+      "description": "Start a focus session",
+      "url": "/focus",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
       "name": "Today's Tasks",
       "short_name": "Today",
-      "description": "View today's tasks",
-      "url": "/tasks?filter=today",
+      "description": "View your tasks",
+      "url": "/tasks",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Habits",
+      "short_name": "Habits",
+      "description": "Track your daily habits",
+      "url": "/habits",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }
-  ]
+  ],
+  "prefer_related_applications": false
 }
