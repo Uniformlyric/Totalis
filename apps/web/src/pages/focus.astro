@@ -1,0 +1,11 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import { MainLayout } from '../components/layout/MainLayout';
+import { FocusPage } from '../components/focus';
+---
+
+<AppLayout title="Focus">
+  <MainLayout client:load>
+    <FocusPage client:load />
+  </MainLayout>
+</AppLayout>
