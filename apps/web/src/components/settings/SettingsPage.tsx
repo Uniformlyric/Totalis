@@ -1,7 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, Button, Input, Badge } from '@/components/ui';
 import type { User } from 'firebase/auth';
 import type { UserSettings } from '@totalis/shared';
+import { doc, setDoc, getDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { 
+  isPushSupported, 
+  getNotificationPermission, 
+  subscribeToPush, 
+  unsubscribeFromPush,
+  isPushSubscribed,
+  showLocalNotification
+} from '@/lib/push';
+import { exportAndDownload } from '@/lib/export';
 
 interface ToggleSwitchProps {
   enabled: boolean;
@@ -56,11 +66,80 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<UserSettings>(defaultSettings);
   const [currentTheme, setCurrentTheme] = useState<Theme>('celestial');
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [displayName, setDisplayName] = useState('');
   const [isEditingName, setIsEditingName] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushPermission, setPushPermission] = useState<NotificationPermission>('default');
+  const [isSubscribingPush, setIsSubscribingPush] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
-  // Check authentication
+  // Save settings to Firestore
+  const saveSettingsToFirestore = useCallback(async (newSettings: UserSettings, userId: string) => {
+    try {
+      setIsSaving(true);
+      const { getDb } = await import('@/lib/firebase');
+      const db = getDb();
+      const userSettingsRef = doc(db, 'users', userId, 'settings', 'preferences');
+      await setDoc(userSettingsRef, {
+        ...newSettings,
+        updatedAt: new Date()
+      }, { merge: true });
+      setSaveMessage({ type: 'success', text: 'Settings saved!' });
+      setHasUnsavedChanges(false);
+      setTimeout(() => setSaveMessage(null), 2000);
+    } catch (err) {
+      console.error('Failed to save settings:', err);
+      setSaveMessage({ type: 'error', text: 'Failed to save settings' });
+      setTimeout(() => setSaveMessage(null), 3000);
+    } finally {
+      setIsSaving(false);
+    }
+  }, []);
+
+  // Load settings from Firestore
+  const loadSettingsFromFirestore = useCallback(async (userId: string) => {
+    try {
+      const { getDb } = await import('@/lib/firebase');
+      const db = getDb();
+      const userSettingsRef = doc(db, 'users', userId, 'settings', 'preferences');
+      const settingsDoc = await getDoc(userSettingsRef);
+      
+      if (settingsDoc.exists()) {
+        const savedSettings = settingsDoc.data() as UserSettings;
+        setSettings(prev => ({ ...defaultSettings, ...savedSettings }));
+        if (savedSettings.theme) {
+          setCurrentTheme(savedSettings.theme);
+          localStorage.setItem('totalis-theme', savedSettings.theme);
+          applyTheme(savedSettings.theme);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load settings:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Apply theme to DOM
+  const applyTheme = (theme: Theme) => {
+    if (theme === 'sunset') {
+      document.documentElement.setAttribute('data-theme', 'sunset');
+    } else if (theme === 'system') {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (prefersDark) {
+        document.documentElement.removeAttribute('data-theme');
+      } else {
+        document.documentElement.setAttribute('data-theme', 'sunset');
+      }
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  };
+
+  // Check authentication and load settings
   useEffect(() => {
     const checkAuth = async () => {
       try {
@@ -74,7 +153,9 @@ export function SettingsPage() {
           
           if (firebaseUser) {
             setDisplayName(firebaseUser.displayName || '');
+            loadSettingsFromFirestore(firebaseUser.uid);
           } else {
+            setIsLoading(false);
             window.location.href = '/login';
           }
         });
@@ -83,36 +164,129 @@ export function SettingsPage() {
       } catch (err) {
         console.error('Auth check failed:', err);
         setAuthChecked(true);
+        setIsLoading(false);
       }
     };
 
     checkAuth();
-  }, []);
+  }, [loadSettingsFromFirestore]);
 
-  // Load theme from localStorage
+  // Load theme from localStorage (fallback while Firestore loads)
   useEffect(() => {
     const savedTheme = localStorage.getItem('totalis-theme') as Theme || 'celestial';
     setCurrentTheme(savedTheme);
-    setSettings(prev => ({ ...prev, theme: savedTheme }));
+    applyTheme(savedTheme);
   }, []);
+
+  // Check push notification support
+  useEffect(() => {
+    const checkPushSupport = async () => {
+      setPushSupported(isPushSupported());
+      setPushPermission(getNotificationPermission());
+      
+      // Check if already subscribed
+      if (isPushSupported()) {
+        const subscribed = await isPushSubscribed();
+        if (subscribed) {
+          setSettings(prev => ({
+            ...prev,
+            notifications: { ...prev.notifications, pushNotifications: true }
+          }));
+        }
+      }
+    };
+    checkPushSupport();
+  }, []);
+
+  // Handle push notification toggle
+  const handlePushToggle = async () => {
+    if (!user || isSubscribingPush) return;
+    
+    // Import isLocalhost to check environment
+    const { isLocalhost } = await import('@/lib/push');
+    
+    setIsSubscribingPush(true);
+    try {
+      const { getDb } = await import('@/lib/firebase');
+      const db = getDb();
+      
+      if (settings.notifications.pushNotifications) {
+        // Unsubscribe
+        await unsubscribeFromPush();
+        updateSettings(prev => ({
+          ...prev,
+          notifications: { ...prev.notifications, pushNotifications: false }
+        }));
+        setSaveMessage({ type: 'success', text: 'Push notifications disabled' });
+      } else {
+        // Subscribe
+        const subscription = await subscribeToPush();
+        
+        if (subscription) {
+          // Save subscription to Firestore
+          const userRef = doc(db, 'users', user.uid);
+          await setDoc(userRef, {
+            webPushSubscriptions: arrayUnion({
+              ...subscription,
+              createdAt: new Date(),
+              userAgent: navigator.userAgent
+            })
+          }, { merge: true });
+          
+          updateSettings(prev => ({
+            ...prev,
+            notifications: { ...prev.notifications, pushNotifications: true }
+          }));
+          setPushPermission('granted');
+          setSaveMessage({ type: 'success', text: 'Push notifications enabled! 🔔' });
+        } else {
+          setPushPermission(getNotificationPermission());
+          if (getNotificationPermission() === 'denied') {
+            setSaveMessage({ type: 'error', text: 'Permission denied. Enable in browser settings.' });
+          } else if (isLocalhost()) {
+            // Localhost limitation - inform user
+            setSaveMessage({ type: 'error', text: 'Push may not work on localhost. Will work in production.' });
+          } else {
+            setSaveMessage({ type: 'error', text: 'Failed to subscribe. Try again later.' });
+          }
+        }
+      }
+      setTimeout(() => setSaveMessage(null), 4000);
+    } catch (err) {
+      console.error('[Push] Toggle failed:', err);
+      setSaveMessage({ type: 'error', text: 'Failed to update push notifications' });
+      setTimeout(() => setSaveMessage(null), 3000);
+    } finally {
+      setIsSubscribingPush(false);
+    }
+  };
 
   const handleThemeChange = (theme: Theme) => {
     setCurrentTheme(theme);
-    setSettings(prev => ({ ...prev, theme }));
+    const newSettings = { ...settings, theme };
+    setSettings(newSettings);
     localStorage.setItem('totalis-theme', theme);
+    applyTheme(theme);
     
-    if (theme === 'sunset') {
-      document.documentElement.setAttribute('data-theme', 'sunset');
-    } else if (theme === 'system') {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      if (prefersDark) {
-        document.documentElement.removeAttribute('data-theme');
-      } else {
-        document.documentElement.setAttribute('data-theme', 'sunset');
-      }
-    } else {
-      document.documentElement.removeAttribute('data-theme');
+    // Save to Firestore immediately for theme changes
+    if (user) {
+      saveSettingsToFirestore(newSettings, user.uid);
     }
+  };
+
+  // Update settings and mark as unsaved
+  const updateSettings = (updater: (prev: UserSettings) => UserSettings) => {
+    setSettings(prev => {
+      const newSettings = updater(prev);
+      setHasUnsavedChanges(true);
+      return newSettings;
+    });
+  };
+
+  // Save all pending settings
+  const handleSaveSettings = async () => {
+    if (!user) return;
+    await saveSettingsToFirestore(settings, user.uid);
   };
 
   const handleUpdateDisplayName = async () => {
@@ -174,11 +348,31 @@ export function SettingsPage() {
     }
   };
 
-  // Show loading while checking auth
-  if (!authChecked) {
+  const handleExportData = async (format: 'json' | 'csv') => {
+    if (isExporting) return;
+    
+    setIsExporting(true);
+    try {
+      await exportAndDownload({ format, includeCompleted: true });
+      setSaveMessage({ type: 'success', text: `Data exported as ${format.toUpperCase()}!` });
+      setTimeout(() => setSaveMessage(null), 3000);
+    } catch (err) {
+      console.error('Export failed:', err);
+      setSaveMessage({ type: 'error', text: 'Failed to export data' });
+      setTimeout(() => setSaveMessage(null), 3000);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Show loading while checking auth or loading settings
+  if (!authChecked || isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" />
+        <div className="text-center">
+          <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+          <p className="text-text-muted">Loading settings...</p>
+        </div>
       </div>
     );
   }
@@ -197,9 +391,21 @@ export function SettingsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-text">Settings</h1>
-        <p className="text-text-secondary mt-1">Manage your preferences and account</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-text">Settings</h1>
+          <p className="text-text-secondary mt-1">Manage your preferences and account</p>
+        </div>
+        {hasUnsavedChanges && (
+          <Button onClick={handleSaveSettings} isLoading={isSaving}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+              <polyline points="17 21 17 13 7 13 7 21"/>
+              <polyline points="7 3 7 8 15 8"/>
+            </svg>
+            Save Changes
+          </Button>
+        )}
       </div>
 
       {/* Save Message */}
@@ -264,7 +470,7 @@ export function SettingsPage() {
           <CardContent className="divide-y divide-border">
             <ToggleSwitch
               enabled={settings.notifications.morningSummary.enabled}
-              onToggle={(enabled) => setSettings(prev => ({
+              onToggle={(enabled) => updateSettings(prev => ({
                 ...prev,
                 notifications: {
                   ...prev.notifications,
@@ -276,7 +482,7 @@ export function SettingsPage() {
             />
             <ToggleSwitch
               enabled={settings.notifications.eveningRecap.enabled}
-              onToggle={(enabled) => setSettings(prev => ({
+              onToggle={(enabled) => updateSettings(prev => ({
                 ...prev,
                 notifications: {
                   ...prev.notifications,
@@ -288,25 +494,61 @@ export function SettingsPage() {
             />
             <ToggleSwitch
               enabled={settings.notifications.urgentReminders}
-              onToggle={(urgentReminders) => setSettings(prev => ({
+              onToggle={(urgentReminders) => updateSettings(prev => ({
                 ...prev,
                 notifications: { ...prev.notifications, urgentReminders }
               }))}
               label="Urgent Reminders"
               description="Get notified about urgent tasks"
             />
-            <ToggleSwitch
-              enabled={settings.notifications.pushNotifications}
-              onToggle={(pushNotifications) => setSettings(prev => ({
-                ...prev,
-                notifications: { ...prev.notifications, pushNotifications }
-              }))}
-              label="Push Notifications"
-              description="Receive browser push notifications"
-            />
+            <div className="flex items-center justify-between py-3">
+              <div>
+                <p className="font-medium text-text">Push Notifications</p>
+                <p className="text-sm text-text-secondary">
+                  {!pushSupported 
+                    ? 'Not supported in this browser' 
+                    : pushPermission === 'denied' 
+                      ? 'Blocked - enable in browser settings'
+                      : 'Receive browser push notifications'
+                  }
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {isSubscribingPush && (
+                  <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+                )}
+                <button
+                  onClick={handlePushToggle}
+                  disabled={!pushSupported || pushPermission === 'denied' || isSubscribingPush}
+                  className={`w-12 h-6 rounded-full relative transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    settings.notifications.pushNotifications ? 'bg-primary' : 'bg-surface-hover'
+                  }`}
+                >
+                  <span 
+                    className={`absolute top-1 w-4 h-4 rounded-full transition-all ${
+                      settings.notifications.pushNotifications ? 'right-1 bg-white' : 'left-1 bg-text-muted'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+            {settings.notifications.pushNotifications && pushSupported && (
+              <div className="py-2">
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => showLocalNotification('Test Notification', {
+                    body: 'Push notifications are working! 🎉',
+                    tag: 'test'
+                  })}
+                >
+                  🔔 Send Test Notification
+                </Button>
+              </div>
+            )}
             <ToggleSwitch
               enabled={settings.notifications.emailNotifications}
-              onToggle={(emailNotifications) => setSettings(prev => ({
+              onToggle={(emailNotifications) => updateSettings(prev => ({
                 ...prev,
                 notifications: { ...prev.notifications, emailNotifications }
               }))}
@@ -328,7 +570,7 @@ export function SettingsPage() {
                 <Input
                   type="time"
                   value={settings.workingHours.start}
-                  onChange={(e) => setSettings(prev => ({
+                  onChange={(e) => updateSettings(prev => ({
                     ...prev,
                     workingHours: { ...prev.workingHours, start: e.target.value }
                   }))}
@@ -339,7 +581,7 @@ export function SettingsPage() {
                 <Input
                   type="time"
                   value={settings.workingHours.end}
-                  onChange={(e) => setSettings(prev => ({
+                  onChange={(e) => updateSettings(prev => ({
                     ...prev,
                     workingHours: { ...prev.workingHours, end: e.target.value }
                   }))}
@@ -355,7 +597,7 @@ export function SettingsPage() {
                 min={1}
                 max={168}
                 value={settings.weeklyCapacity}
-                onChange={(e) => setSettings(prev => ({
+                onChange={(e) => updateSettings(prev => ({
                   ...prev,
                   weeklyCapacity: parseInt(e.target.value) || 40
                 }))}
@@ -460,6 +702,52 @@ export function SettingsPage() {
                 </svg>
                 Delete Account
               </Button>
+            </div>
+            
+            {/* Data Export */}
+            <div className="pt-4 border-t border-border">
+              <p className="font-medium text-text mb-2">Export Your Data</p>
+              <p className="text-sm text-text-secondary mb-3">
+                Download all your tasks, habits, projects, goals, and notes.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button 
+                  variant="secondary" 
+                  size="sm"
+                  onClick={() => handleExportData('json')}
+                  disabled={isExporting}
+                >
+                  {isExporting ? (
+                    <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full mr-2" />
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                  )}
+                  Export JSON
+                </Button>
+                <Button 
+                  variant="secondary" 
+                  size="sm"
+                  onClick={() => handleExportData('csv')}
+                  disabled={isExporting}
+                >
+                  {isExporting ? (
+                    <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full mr-2" />
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                      <line x1="16" y1="13" x2="8" y2="13"/>
+                      <line x1="16" y1="17" x2="8" y2="17"/>
+                      <polyline points="10 9 9 9 8 9"/>
+                    </svg>
+                  )}
+                  Export CSV
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

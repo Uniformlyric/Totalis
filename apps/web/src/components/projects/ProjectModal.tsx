@@ -54,6 +54,23 @@ export function ProjectModal({
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  // Helper to safely convert Firestore Timestamp or date to string
+  const toDateString = (value: unknown): string => {
+    if (!value) return '';
+    try {
+      // Handle Firestore Timestamp
+      if (typeof value === 'object' && value !== null && 'toDate' in value && typeof (value as { toDate: () => Date }).toDate === 'function') {
+        return (value as { toDate: () => Date }).toDate().toISOString().split('T')[0];
+      }
+      // Handle date string or Date object
+      const date = new Date(value as string | number);
+      if (isNaN(date.getTime())) return '';
+      return date.toISOString().split('T')[0];
+    } catch {
+      return '';
+    }
+  };
+
   // Reset form when project changes
   useEffect(() => {
     if (project) {
@@ -62,7 +79,7 @@ export function ProjectModal({
       setStatus(project.status);
       setColor(project.color || colorOptions[0]);
       setGoalId(project.goalId || '');
-      setDeadline(project.deadline ? new Date(project.deadline).toISOString().split('T')[0] : '');
+      setDeadline(toDateString(project.deadline));
       setEstimatedHours(project.estimatedHours || 0);
       setTags(project.tags || []);
     } else {

@@ -158,6 +158,11 @@ body {
   100% { transform: scale(1.5); opacity: 0; }
 }
 
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
 .animate-fade-in { animation: fade-in var(--transition-normal) ease-out; }
 .animate-slide-up { animation: slide-up var(--transition-normal) ease-out; }
 .animate-slide-in-right { animation: slide-in-right var(--transition-normal) ease-out; }

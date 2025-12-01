@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button, Checkbox } from '@/components/ui';
 import { CompletionCelebration } from '@/components/tasks';
+import { OnboardingModal } from '@/components/onboarding';
 import type { Task, Habit, HabitLog, Project, Goal } from '@totalis/shared';
 import type { User } from 'firebase/auth';
 
@@ -148,6 +149,8 @@ export function Dashboard() {
   const [userName, setUserName] = useState('');
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
 
   // Check authentication first
   useEffect(() => {
@@ -178,6 +181,31 @@ export function Dashboard() {
 
     checkAuth();
   }, []);
+
+  // Check if user needs onboarding
+  useEffect(() => {
+    if (!authChecked || !user) return;
+
+    const checkOnboarding = async () => {
+      try {
+        const { getDb } = await import('@/lib/firebase');
+        const { doc, getDoc } = await import('firebase/firestore');
+        const db = getDb();
+        
+        const onboardingDoc = await getDoc(doc(db, 'users', user.uid, 'settings', 'onboarding'));
+        
+        if (!onboardingDoc.exists() || !onboardingDoc.data()?.completed) {
+          setShowOnboarding(true);
+        }
+        setOnboardingChecked(true);
+      } catch (err) {
+        console.error('Onboarding check failed:', err);
+        setOnboardingChecked(true);
+      }
+    };
+
+    checkOnboarding();
+  }, [authChecked, user]);
 
   // Load all data after auth is confirmed
   useEffect(() => {
@@ -355,6 +383,16 @@ export function Dashboard() {
           <p className="text-text-muted">Redirecting to login...</p>
         </div>
       </div>
+    );
+  }
+
+  // Show onboarding for new users
+  if (showOnboarding && onboardingChecked) {
+    return (
+      <OnboardingModal 
+        user={user} 
+        onComplete={() => setShowOnboarding(false)} 
+      />
     );
   }
 
