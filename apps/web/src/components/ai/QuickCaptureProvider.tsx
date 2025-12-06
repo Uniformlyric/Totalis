@@ -158,20 +158,34 @@ export function QuickCaptureProvider({ children }: QuickCaptureProviderProps) {
                 goalId = matchedGoal?.id;
               }
 
-              await createProject({
-                title: projectItem.title,
-                description: projectItem.description,
-                deadline: projectItem.deadline ? new Date(projectItem.deadline) : undefined,
-                estimatedHours: projectItem.estimatedHours || 0,
-                goalId,
-                status: 'active',
-                progress: 0,
-                taskCount: 0,
-                completedTaskCount: 0,
-                actualHours: 0,
-                color: projectItem.color,
-                tags: projectItem.tags,
-              });
+              // Check if project has milestones (new structured format)
+              if (projectItem.milestones && projectItem.milestones.length > 0) {
+                // Use new structured project creation
+                const { createProjectWithMilestones } = await import('@/lib/ai/project-creator');
+                const result = await createProjectWithMilestones({
+                  ...projectItem,
+                  goalName: goalId ? undefined : projectItem.goalName, // Pass goalId in project data below
+                });
+                console.log(`✅ Created project "${projectItem.title}" with ${result.milestoneIds.length} milestones and ${result.totalTasks} tasks`);
+              } else {
+                // Legacy: simple project without milestones
+                await createProject({
+                  title: projectItem.title,
+                  description: projectItem.description,
+                  deadline: projectItem.deadline ? new Date(projectItem.deadline) : undefined,
+                  estimatedHours: projectItem.estimatedHours || 0,
+                  goalId,
+                  status: 'active',
+                  progress: 0,
+                  taskCount: 0,
+                  completedTaskCount: 0,
+                  milestoneCount: 0,
+                  completedMilestoneCount: 0,
+                  actualHours: 0,
+                  color: projectItem.color,
+                  tags: projectItem.tags,
+                });
+              }
               break;
             }
 

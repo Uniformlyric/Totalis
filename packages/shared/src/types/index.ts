@@ -69,6 +69,8 @@ export interface Project {
   progress: number;
   taskCount: number;
   completedTaskCount: number;
+  milestoneCount: number;
+  completedMilestoneCount: number;
   startDate?: Date;
   deadline?: Date;
   estimatedHours: number;
@@ -79,10 +81,32 @@ export interface Project {
   updatedAt: Date;
 }
 
+export interface Milestone {
+  id: string;
+  projectId: string;
+  userId: string;
+  title: string;
+  description?: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked';
+  order: number; // 1, 2, 3... for sequence
+  estimatedHours: number;
+  actualHours: number;
+  startDate?: Date;
+  deadline?: Date;
+  completedAt?: Date;
+  taskCount: number;
+  completedTaskCount: number;
+  progress: number; // 0-100, calculated from tasks
+  dependencies: string[]; // milestone IDs that must complete before this one
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface Task {
   id: string;
   userId: string;
   projectId?: string;
+  milestoneId?: string;
   goalId?: string;
   title: string;
   description?: string;

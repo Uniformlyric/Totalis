@@ -57,6 +57,10 @@ export async function updateTask(taskId: string, updates: Partial<Task>): Promis
 
   const taskRef = doc(getDb(), 'users', userId, 'tasks', taskId);
   
+  // Get the task first to check if status is changing and get milestoneId
+  const taskSnapshot = await getDoc(taskRef);
+  const currentTask = taskSnapshot.exists() ? { id: taskSnapshot.id, ...taskSnapshot.data() } as Task : null;
+  
   // Remove undefined values - Firestore doesn't accept them
   const cleanUpdates = removeUndefined(updates);
   
@@ -64,6 +68,12 @@ export async function updateTask(taskId: string, updates: Partial<Task>): Promis
     ...cleanUpdates,
     updatedAt: Timestamp.now(),
   });
+
+  // Recalculate milestone progress if task has a milestone and status changed
+  if (currentTask?.milestoneId && updates.status !== undefined) {
+    const { recalculateMilestoneProgress } = await import('./milestones');
+    await recalculateMilestoneProgress(currentTask.milestoneId);
+  }
 }
 
 export async function deleteTask(taskId: string): Promise<void> {
@@ -90,6 +100,7 @@ export async function getTask(taskId: string): Promise<Task | null> {
 export async function getTasks(filters?: {
   status?: Task['status'];
   projectId?: string;
+  milestoneId?: string;
   dueDate?: Date;
 }): Promise<Task[]> {
   const auth = getAuthInstance();
@@ -105,6 +116,9 @@ export async function getTasks(filters?: {
   if (filters?.projectId) {
     q = query(q, where('projectId', '==', filters.projectId));
   }
+  if (filters?.milestoneId) {
+    q = query(q, where('milestoneId', '==', filters.milestoneId));
+  }
 
   const snapshot = await getDocs(q);
   return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Task));
@@ -112,7 +126,7 @@ export async function getTasks(filters?: {
 
 export function subscribeToTasks(
   callback: (tasks: Task[]) => void,
-  filters?: { status?: Task['status']; projectId?: string }
+  filters?: { status?: Task['status']; projectId?: string; milestoneId?: string }
 ): Unsubscribe {
   const auth = getAuthInstance();
   const userId = auth.currentUser?.uid;
@@ -123,6 +137,12 @@ export function subscribeToTasks(
 
   if (filters?.status) {
     q = query(q, where('status', '==', filters.status));
+  }
+  if (filters?.projectId) {
+    q = query(q, where('projectId', '==', filters.projectId));
+  }
+  if (filters?.milestoneId) {
+    q = query(q, where('milestoneId', '==', filters.milestoneId));
   }
 
   return onSnapshot(q, (snapshot) => {
@@ -158,4 +178,11 @@ export async function completeTask(taskId: string): Promise<void> {
     status: 'completed',
     completedAt: new Date(),
   });
+
+  // Recalculate milestone progress if task belongs to a milestone
+  const task = await getTask(taskId);
+  if (task?.milestoneId) {
+    const { recalculateMilestoneProgress } = await import('./milestones');
+    await recalculateMilestoneProgress(task.milestoneId);
+  }
 }

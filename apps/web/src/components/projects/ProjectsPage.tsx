@@ -1,21 +1,27 @@
 import { useState, useEffect } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { getAuthInstance } from '@/lib/firebase';
-import { subscribeToProjects, createProject, updateProject, deleteProject } from '@/lib/db';
+import { subscribeToProjects, createProject, updateProject, deleteProjectWithCascade, updateTask } from '@/lib/db';
 import { subscribeToGoals } from '@/lib/db';
 import { ProjectList, ProjectModal } from '@/components/projects';
+import { ProjectView } from './ProjectView';
+import { TaskModal } from '@/components/tasks/TaskModal';
 import { FloatingAddButton } from '@/components/tasks/FloatingAddButton';
-import type { Project, Goal } from '@totalis/shared';
+import type { Project, Goal, Task, Milestone } from '@totalis/shared';
 
 export function ProjectsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [viewingProject, setViewingProject] = useState<Project | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
 
   // Auth state listener
   useEffect(() => {
@@ -46,9 +52,29 @@ export function ProjectsPage() {
       setGoals(updatedGoals);
     });
 
+    // Subscribe to all milestones for the user
+    let unsubMilestones: (() => void) | undefined;
+    const loadMilestones = async () => {
+      const { subscribeToMilestones } = await import('@/lib/db/milestones');
+      // Subscribe to all milestones across all projects
+      const milestonesCol = (await import('firebase/firestore')).collection(
+        (await import('@/lib/firebase')).getDb(),
+        'users',
+        user.uid,
+        'milestones'
+      );
+      const milestonesQuery = (await import('firebase/firestore')).query(milestonesCol);
+      unsubMilestones = (await import('firebase/firestore')).onSnapshot(milestonesQuery, (snapshot) => {
+        const allMilestones = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Milestone));
+        setMilestones(allMilestones);
+      });
+    };
+    loadMilestones();
+
     return () => {
       unsubProjects();
       unsubGoals();
+      unsubMilestones?.();
     };
   }, [user, authChecked]);
 
@@ -59,9 +85,28 @@ export function ProjectsPage() {
   };
 
   const handleProjectClick = (project: Project) => {
-    setSelectedProject(project);
-    setModalMode('edit');
-    setIsModalOpen(true);
+    // Open immersive view instead of modal for existing projects
+    setViewingProject(project);
+  };
+
+  const handleCloseProjectView = () => {
+    setViewingProject(null);
+  };
+
+  const handleTaskClick = (task: Task) => {
+    setSelectedTask(task);
+    setIsTaskModalOpen(true);
+  };
+
+  const handleSaveTask = async (taskData: Partial<Task>) => {
+    if (taskData.id) {
+      await updateTask(taskData.id, taskData);
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    const { deleteTask } = await import('@/lib/db/tasks');
+    await deleteTask(taskId);
   };
 
   const handleSaveProject = async (projectData: Partial<Project>) => {
@@ -83,7 +128,9 @@ export function ProjectsPage() {
   };
 
   const handleDeleteProject = async (projectId: string) => {
-    await deleteProject(projectId);
+    console.log('🗑️ Deleting project with cascade...');
+    const result = await deleteProjectWithCascade(projectId);
+    console.log('✅ Deleted:', result);
   };
 
   // Show login prompt if not authenticated
@@ -120,6 +167,25 @@ export function ProjectsPage() {
           </a>
         </div>
       </div>
+    );
+  }
+
+  // If viewing a project, show immersive view
+  if (viewingProject) {
+    return (
+      <ProjectView
+        project={viewingProject}
+        onClose={handleCloseProjectView}
+        onSave={async (projectData) => {
+          if (projectData.id) {
+            await updateProject(projectData.id, projectData);
+            // Update the viewing project with new data
+            setViewingProject(prev => prev ? { ...prev, ...projectData } : null);
+          }
+        }}
+        onDelete={handleDeleteProject}
+        goals={goals}
+      />
     );
   }
 
@@ -183,6 +249,18 @@ export function ProjectsPage() {
         onDelete={handleDeleteProject}
         goals={goals}
         mode={modalMode}
+      />
+
+      {/* Task Modal */}
+      <TaskModal
+        task={selectedTask}
+        isOpen={isTaskModalOpen}
+        onClose={() => setIsTaskModalOpen(false)}
+        onSave={handleSaveTask}
+        onDelete={handleDeleteTask}
+        projects={projects}
+        milestones={milestones}
+        mode={selectedTask ? 'edit' : 'create'}
       />
     </div>
   );

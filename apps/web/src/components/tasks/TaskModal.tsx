@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Modal, Button, Input, Textarea, Badge } from '@/components/ui';
-import type { Task, Project } from '@totalis/shared';
+import type { Task, Project, Milestone } from '@totalis/shared';
 
 interface TaskModalProps {
   task: Task | null;
@@ -8,22 +8,24 @@ interface TaskModalProps {
   onClose: () => void;
   onSave: (task: Partial<Task>) => Promise<void>;
   onDelete?: (taskId: string) => Promise<void>;
+  onComplete?: (taskId: string) => Promise<void>;
   projects?: Project[];
+  milestones?: Milestone[];
   mode?: 'create' | 'edit';
 }
 
-const priorityOptions: { value: Task['priority']; label: string; color: string }[] = [
-  { value: 'low', label: 'Low', color: 'bg-text-muted' },
-  { value: 'medium', label: 'Medium', color: 'bg-primary' },
-  { value: 'high', label: 'High', color: 'bg-warning' },
-  { value: 'urgent', label: 'Urgent', color: 'bg-danger' },
+const priorityOptions: { value: Task['priority']; label: string; color: string; description: string }[] = [
+  { value: 'low', label: 'Low', color: 'bg-gray-500', description: 'Nice to have' },
+  { value: 'medium', label: 'Medium', color: 'bg-blue-500', description: 'Should do' },
+  { value: 'high', label: 'High', color: 'bg-orange-500', description: 'Important' },
+  { value: 'urgent', label: 'Urgent', color: 'bg-red-500', description: 'Do now!' },
 ];
 
-const statusOptions: { value: Task['status']; label: string }[] = [
-  { value: 'pending', label: 'To Do' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'blocked', label: 'Blocked' },
+const statusOptions: { value: Task['status']; label: string; icon: string }[] = [
+  { value: 'pending', label: 'To Do', icon: '○' },
+  { value: 'in_progress', label: 'In Progress', icon: '◐' },
+  { value: 'completed', label: 'Completed', icon: '●' },
+  { value: 'blocked', label: 'Blocked', icon: '⊘' },
 ];
 
 export function TaskModal({
@@ -32,7 +34,9 @@ export function TaskModal({
   onClose,
   onSave,
   onDelete,
+  onComplete,
   projects = [],
+  milestones = [],
   mode = 'edit',
 }: TaskModalProps) {
   const [title, setTitle] = useState('');
@@ -40,6 +44,7 @@ export function TaskModal({
   const [priority, setPriority] = useState<Task['priority']>('medium');
   const [status, setStatus] = useState<Task['status']>('pending');
   const [projectId, setProjectId] = useState<string>('');
+  const [milestoneId, setMilestoneId] = useState<string>('');
   const [dueDate, setDueDate] = useState('');
   const [estimatedMinutes, setEstimatedMinutes] = useState(30);
   const [tags, setTags] = useState<string[]>([]);
@@ -47,6 +52,26 @@ export function TaskModal({
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Get milestones for selected project
+  const projectMilestones = milestones.filter(m => m.projectId === projectId);
+
+  // Helper to safely convert date to string
+  const toDateString = (value: unknown): string => {
+    if (!value) return '';
+    try {
+      // Handle Firestore Timestamp
+      if (typeof value === 'object' && value !== null && 'toDate' in value && typeof (value as any).toDate === 'function') {
+        return (value as any).toDate().toISOString().split('T')[0];
+      }
+      // Handle date string or Date object
+      const date = new Date(value as string | number);
+      if (isNaN(date.getTime())) return '';
+      return date.toISOString().split('T')[0];
+    } catch {
+      return '';
+    }
+  };
 
   // Reset form when task changes
   useEffect(() => {
@@ -56,7 +81,8 @@ export function TaskModal({
       setPriority(task.priority);
       setStatus(task.status);
       setProjectId(task.projectId || '');
-      setDueDate(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '');
+      setMilestoneId(task.milestoneId || '');
+      setDueDate(toDateString(task.dueDate));
       setEstimatedMinutes(task.estimatedMinutes);
       setTags(task.tags);
     } else {
@@ -66,6 +92,7 @@ export function TaskModal({
       setPriority('medium');
       setStatus('pending');
       setProjectId('');
+      setMilestoneId('');
       setDueDate('');
       setEstimatedMinutes(30);
       setTags([]);
@@ -86,6 +113,7 @@ export function TaskModal({
         priority,
         status,
         projectId: projectId || undefined,
+        milestoneId: milestoneId || undefined,
         dueDate: dueDate ? new Date(dueDate) : undefined,
         estimatedMinutes,
         estimatedSource: 'manual',
@@ -129,86 +157,128 @@ export function TaskModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={mode === 'create' ? 'Create Task' : 'Edit Task'}
+      title={mode === 'create' ? 'Create Task' : task?.title || 'Edit Task'}
       size="lg"
     >
-      <form onSubmit={handleSubmit} className="space-y-5">
-        {/* Title */}
-        <Input
-          label="Title"
-          placeholder="What needs to be done?"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          required
-          autoFocus
-        />
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Title - Prominent */}
+        <div>
+          <Input
+            label="What needs to be done?"
+            placeholder="e.g., Review quarterly report, Call dentist, Research competitors..."
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+            autoFocus
+            className="text-lg"
+          />
+        </div>
 
         {/* Description */}
-        <Textarea
-          label="Description"
-          placeholder="Add more details..."
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={3}
-        />
+        <div>
+          <Textarea
+            label="Details (optional)"
+            placeholder="Add any additional context, notes, or requirements..."
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+          />
+        </div>
 
-        {/* Priority and Status */}
-        <div className="grid grid-cols-2 gap-4">
+        {/* Priority - Visual Selection */}
+        <div>
+          <label className="block text-sm font-medium text-text mb-3">Priority Level</label>
+          <div className="grid grid-cols-4 gap-2">
+            {priorityOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setPriority(option.value)}
+                className={`
+                  p-3 rounded-lg border-2 transition-all text-center
+                  ${priority === option.value
+                    ? 'border-primary bg-primary/10'
+                    : 'border-border bg-surface hover:border-primary/30'
+                  }
+                `}
+              >
+                <div className={`w-3 h-3 rounded-full ${option.color} mx-auto mb-1`} />
+                <span className={`text-sm font-medium ${priority === option.value ? 'text-primary' : 'text-text'}`}>
+                  {option.label}
+                </span>
+                <span className="text-xs text-text-muted block mt-0.5">{option.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Status - Only show in edit mode */}
+        {mode === 'edit' && (
           <div>
-            <label className="block text-sm font-medium text-text mb-2">Priority</label>
-            <div className="flex gap-2">
-              {priorityOptions.map((option) => (
+            <label className="block text-sm font-medium text-text mb-3">Status</label>
+            <div className="grid grid-cols-4 gap-2">
+              {statusOptions.map((option) => (
                 <button
                   key={option.value}
                   type="button"
-                  onClick={() => setPriority(option.value)}
+                  onClick={() => setStatus(option.value)}
                   className={`
-                    flex-1 py-2 px-3 text-sm rounded-lg border transition-all
-                    ${priority === option.value
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-surface text-text-muted hover:border-primary/30'
+                    p-2 rounded-lg border-2 transition-all text-center
+                    ${status === option.value
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border bg-surface hover:border-primary/30'
                     }
                   `}
                 >
-                  <span className={`inline-block w-2 h-2 rounded-full ${option.color} mr-1.5`} />
-                  {option.label}
+                  <span className="text-lg block mb-0.5">{option.icon}</span>
+                  <span className={`text-xs font-medium ${status === option.value ? 'text-primary' : 'text-text'}`}>
+                    {option.label}
+                  </span>
                 </button>
               ))}
             </div>
           </div>
+        )}
 
-          <div>
-            <label className="block text-sm font-medium text-text mb-2">Status</label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as Task['status'])}
-              className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
-            >
-              {statusOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Project Selection */}
+        {/* Project & Milestone Selection */}
         {projects.length > 0 && (
-          <div>
-            <label className="block text-sm font-medium text-text mb-2">Project</label>
-            <select
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
-            >
-              <option value="">No project</option>
-              {projects.filter(p => p.status === 'active').map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.title}
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-text mb-2">Project</label>
+              <select
+                value={projectId}
+                onChange={(e) => {
+                  setProjectId(e.target.value);
+                  setMilestoneId(''); // Reset milestone when project changes
+                }}
+                className="w-full px-3 py-2.5 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="">No project</option>
+                {projects.filter(p => p.status === 'active').map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Milestone Selection - only if project has milestones */}
+            <div>
+              <label className="block text-sm font-medium text-text mb-2">Milestone</label>
+              <select
+                value={milestoneId}
+                onChange={(e) => setMilestoneId(e.target.value)}
+                disabled={!projectId || projectMilestones.length === 0}
+                className="w-full px-3 py-2.5 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+              >
+                <option value="">{projectMilestones.length === 0 ? 'No milestones' : 'Select milestone'}</option>
+                {projectMilestones.map((milestone) => (
+                  <option key={milestone.id} value={milestone.id}>
+                    #{milestone.order} - {milestone.title}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         )}
 
@@ -220,15 +290,15 @@ export function TaskModal({
               type="date"
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full px-3 py-2.5 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-text mb-2">
-              Estimated Time (minutes)
+              How long will this take?
             </label>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <input
                 type="range"
                 min="5"
@@ -236,13 +306,17 @@ export function TaskModal({
                 step="5"
                 value={estimatedMinutes}
                 onChange={(e) => setEstimatedMinutes(parseInt(e.target.value))}
-                className="flex-1 accent-primary"
+                className="flex-1 accent-primary h-2"
               />
-              <span className="text-sm text-text-muted w-16 text-right">
+              <span className="text-sm font-medium text-text w-20 text-right bg-surface-hover px-2 py-1 rounded">
                 {estimatedMinutes < 60
                   ? `${estimatedMinutes}m`
-                  : `${Math.floor(estimatedMinutes / 60)}h ${estimatedMinutes % 60}m`}
+                  : `${Math.floor(estimatedMinutes / 60)}h ${estimatedMinutes % 60 > 0 ? `${estimatedMinutes % 60}m` : ''}`}
               </span>
+            </div>
+            <div className="flex justify-between text-xs text-text-muted mt-1">
+              <span>Quick task</span>
+              <span>Half day</span>
             </div>
           </div>
         </div>

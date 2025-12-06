@@ -28,15 +28,27 @@ export interface ParsedHabit {
   tags: string[];
 }
 
+export interface ParsedMilestone {
+  title: string;
+  description?: string;
+  order: number;
+  estimatedHours: number;
+  deadline?: string; // ISO date string for milestone deadline
+  tasks: ParsedTask[];
+  dependencies?: number[]; // indices of milestone dependencies
+}
+
 export interface ParsedProject {
   type: 'project';
   title: string;
   description?: string;
   deadline?: string;
+  calculatedStartDate?: string; // AI-calculated start date
   estimatedHours?: number;
   goalName?: string; // Will be matched to existing goal
   color?: string;
   tags: string[];
+  milestones: ParsedMilestone[]; // Structured breakdown
 }
 
 export interface ParsedGoal {
@@ -52,6 +64,13 @@ export interface ParsedGoal {
 }
 
 export type ParsedItem = ParsedTask | ParsedHabit | ParsedProject | ParsedGoal;
+
+export interface UserCapacityContext {
+  weeklyCapacity: number; // hours per week
+  workingHours: { start: string; end: string };
+  currentWeeklyHours: number; // already scheduled
+  upcomingDeadlines: Array<{ title: string; date: string; hoursRemaining: number }>;
+}
 
 export interface ParseResult {
   items: ParsedItem[];
@@ -201,6 +220,14 @@ ${pendingItemsList}
    - MEDIUM: should, soon, this week
    - LOW: maybe, someday, eventually, nice to have
 
+5. **SMART PROJECT BREAKDOWN** (CRITICAL FOR PROJECTS):
+   - ALWAYS break projects into 3-7 logical milestones (phases/stages)
+   - Each milestone MUST contain 2-10 actionable tasks
+   - Calculate realistic estimated hours for EACH task based on complexity
+   - Identify dependencies between tasks (which tasks must complete before others)
+   - Consider typical project phases: Planning → Design → Development → Testing → Launch
+   - Make task titles specific and actionable (start with verbs)
+
 ====== RESPONSE FORMAT ======
 
 Always respond with valid JSON:
@@ -222,9 +249,132 @@ Task: { "type": "task", "title": "string", "priority": "low|medium|high|urgent",
 
 Habit: { "type": "habit", "title": "string", "frequency": "daily|weekly|custom", "daysOfWeek": [0-6], "reminderTime": "HH:MM or null", "color": "hex", "tags": [] }
 
-Project: { "type": "project", "title": "string", "deadline": "ISO date or null", "estimatedHours": number, "goalName": "optional", "color": "hex", "tags": [] }
+Project WITH MILESTONES: {
+  "type": "project",
+  "title": "string",
+  "description": "string",
+  "deadline": "ISO date - REQUIRED, calculate realistic deadline based on total hours",
+  "estimatedHours": number,
+  "goalName": "optional",
+  "color": "hex",
+  "tags": [],
+  "milestones": [
+    {
+      "title": "Milestone 1: Planning",
+      "description": "Initial planning and research phase",
+      "order": 1,
+      "estimatedHours": 8,
+      "deadline": "ISO date - calculate based on milestone order and hours",
+      "tasks": [
+        {
+          "type": "task",
+          "title": "Research competitors",
+          "description": "Analyze 3-5 competitor solutions",
+          "priority": "medium",
+          "estimatedMinutes": 120,
+          "dueDate": "ISO date - should be before milestone deadline",
+          "tags": ["research"]
+        },
+        {
+          "type": "task",
+          "title": "Define requirements",
+          "priority": "high",
+          "estimatedMinutes": 180,
+          "dueDate": "ISO date",
+          "tags": ["planning"]
+        }
+      ]
+    },
+    {
+      "title": "Milestone 2: Development",
+      "order": 2,
+      "estimatedHours": 20,
+      "deadline": "ISO date",
+      "dependencies": [0],  // depends on milestone 0 (Planning)
+      "tasks": [ ... ]
+    }
+  ]
+}
 
 Goal: { "type": "goal", "title": "string", "deadline": "ISO date or null", "timeframe": "weekly|monthly|quarterly|yearly", "targetValue": number, "unit": "string", "color": "hex", "tags": [] }
+
+====== DATE CALCULATION RULES ======
+When creating projects, ALWAYS calculate realistic dates:
+1. Project deadline: Based on total estimated hours ÷ 4 hours/day of focused work
+2. Milestone deadlines: Distribute evenly across project timeline
+3. Task due dates: Spread within each milestone's timeframe
+4. Start dates from TODAY: ${new Date().toISOString().split('T')[0]}
+5. Example: 40 hours project = ~10 working days = 2 weeks deadline
+
+====== PROJECT BREAKDOWN EXAMPLES ======
+
+Example 1: "Launch Personal Website"
+{
+  "type": "project",
+  "title": "Launch Personal Website",
+  "description": "Create and deploy a personal portfolio website",
+  "deadline": "2025-01-03",
+  "estimatedHours": 40,
+  "milestones": [
+    {
+      "title": "Planning & Design",
+      "order": 1,
+      "estimatedHours": 10,
+      "deadline": "2025-12-13",
+      "tasks": [
+        {"title": "Research competitor websites", "estimatedMinutes": 120, "dueDate": "2025-12-08"},
+        {"title": "Sketch wireframes", "estimatedMinutes": 180, "dueDate": "2025-12-09"},
+        {"title": "Choose color palette and fonts", "estimatedMinutes": 90, "dueDate": "2025-12-11"},
+        {"title": "Select hosting provider", "estimatedMinutes": 60, "dueDate": "2025-12-13"}
+      ]
+    },
+    {
+      "title": "Development",
+      "order": 2,
+      "estimatedHours": 22,
+      "deadline": "2025-12-27",
+      "dependencies": [0],
+      "tasks": [
+        {"title": "Set up project structure", "estimatedMinutes": 120, "dueDate": "2025-12-15"},
+        {"title": "Build homepage", "estimatedMinutes": 360, "dueDate": "2025-12-18"},
+        {"title": "Create about page", "estimatedMinutes": 240, "dueDate": "2025-12-20"},
+        {"title": "Add portfolio section", "estimatedMinutes": 300, "dueDate": "2025-12-23"},
+        {"title": "Implement contact form", "estimatedMinutes": 180, "dueDate": "2025-12-27"}
+      ]
+    },
+    {
+      "title": "Testing & Launch",
+      "order": 3,
+      "estimatedHours": 8,
+      "deadline": "2025-01-03",
+      "dependencies": [1],
+      "tasks": [
+        {"title": "Test on multiple browsers", "estimatedMinutes": 120, "dueDate": "2025-12-29"},
+        {"title": "Test on mobile devices", "estimatedMinutes": 90, "dueDate": "2025-12-30"},
+        {"title": "Deploy to hosting", "estimatedMinutes": 120, "dueDate": "2025-01-01"},
+        {"title": "Set up analytics", "estimatedMinutes": 60, "dueDate": "2025-01-02"},
+        {"title": "Share on social media", "estimatedMinutes": 30, "dueDate": "2025-01-03"}
+      ]
+    }
+  ]
+}
+
+Example 2: "Write Research Paper"
+Milestones: Literature Review → Methodology → Data Collection → Analysis → Writing → Revision
+
+Example 3: "Organize Home Office"
+Milestones: Planning → Decluttering → Furniture Setup → Organization Systems → Final Touches
+
+====== ESTIMATION GUIDELINES ======
+
+Use these guidelines for task time estimates:
+- Simple tasks (email, quick call): 15-30 minutes
+- Small tasks (document review, short meeting): 30-60 minutes
+- Medium tasks (write document, design mockup): 1-3 hours
+- Large tasks (develop feature, deep research): 3-6 hours
+- Complex tasks (major implementation): 6-12 hours
+
+If a task seems >6 hours, break it into smaller tasks!
 
 ====== EXAMPLES ======
 
@@ -288,15 +438,35 @@ function parseAIResponse(responseText: string): ParseResult {
           } as ParsedHabit;
         
         case 'project':
+          // Validate and clean up milestones
+          const milestones: ParsedMilestone[] = (item.milestones || []).map((m: any, idx: number) => ({
+            title: m.title || `Milestone ${idx + 1}`,
+            description: m.description,
+            order: m.order ?? idx + 1,
+            estimatedHours: m.estimatedHours || 0,
+            dependencies: m.dependencies || [],
+            tasks: (m.tasks || []).map((t: any) => ({
+              type: 'task' as const,
+              title: t.title || 'Untitled Task',
+              description: t.description,
+              priority: t.priority || 'medium' as const,
+              dueDate: t.dueDate,
+              estimatedMinutes: t.estimatedMinutes || 60,
+              tags: t.tags || [],
+            })),
+          }));
+
           return {
             type: 'project',
             title: item.title || 'Untitled Project',
             description: item.description,
             deadline: item.deadline,
-            estimatedHours: item.estimatedHours,
+            calculatedStartDate: item.calculatedStartDate,
+            estimatedHours: item.estimatedHours || milestones.reduce((sum, m) => sum + m.estimatedHours, 0),
             goalName: item.goalName,
             color: item.color || getRandomColor(),
             tags: item.tags || [],
+            milestones,
           } as ParsedProject;
         
         case 'goal':

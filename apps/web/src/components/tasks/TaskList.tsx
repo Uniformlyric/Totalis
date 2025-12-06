@@ -25,6 +25,22 @@ const statusFilters: { value: FilterStatus; label: string }[] = [
 
 const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
 
+// Safe date conversion helper
+const toSafeDate = (value: unknown): Date | null => {
+  if (!value) return null;
+  try {
+    // Handle Firestore Timestamp
+    if (typeof value === 'object' && 'toDate' in value) {
+      return (value as any).toDate();
+    }
+    const date = new Date(value as string | number);
+    if (isNaN(date.getTime())) return null;
+    return date;
+  } catch {
+    return null;
+  }
+};
+
 export function TaskList({
   tasks,
   projects = [],
@@ -36,6 +52,7 @@ export function TaskList({
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<FilterStatus>('all');
   const [priorityFilter, setPriorityFilter] = useState<FilterPriority>('all');
+  const [projectFilter, setProjectFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<SortOption>('dueDate');
   const [showFilters, setShowFilters] = useState(false);
 
@@ -63,19 +80,30 @@ export function TaskList({
       result = result.filter((task) => task.priority === priorityFilter);
     }
 
+    // Project filter
+    if (projectFilter !== 'all') {
+      result = result.filter((task) => task.projectId === projectFilter);
+    }
+
     // Sort
     result.sort((a, b) => {
       switch (sortBy) {
         case 'dueDate': {
-          if (!a.dueDate && !b.dueDate) return 0;
-          if (!a.dueDate) return 1;
-          if (!b.dueDate) return -1;
-          return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+          const dateA = toSafeDate(a.dueDate);
+          const dateB = toSafeDate(b.dueDate);
+          if (!dateA && !dateB) return 0;
+          if (!dateA) return 1;
+          if (!dateB) return -1;
+          return dateA.getTime() - dateB.getTime();
         }
         case 'priority':
           return priorityOrder[a.priority] - priorityOrder[b.priority];
-        case 'created':
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case 'created': {
+          const createdA = toSafeDate(a.createdAt);
+          const createdB = toSafeDate(b.createdAt);
+          if (!createdA || !createdB) return 0;
+          return createdB.getTime() - createdA.getTime();
+        }
         case 'title':
           return a.title.localeCompare(b.title);
         default:
@@ -93,7 +121,7 @@ export function TaskList({
     }
 
     return result;
-  }, [tasks, search, statusFilter, priorityFilter, sortBy]);
+  }, [tasks, search, statusFilter, priorityFilter, projectFilter, sortBy]);
 
   const taskCounts = useMemo(() => {
     return {
@@ -180,7 +208,22 @@ export function TaskList({
 
         {/* Extended filters */}
         {showFilters && (
-          <div className="flex items-center gap-3 p-3 bg-background rounded-lg border border-border">
+          <div className="flex flex-wrap items-center gap-3 p-3 bg-background rounded-lg border border-border">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-text-muted">Project:</label>
+              <select
+                value={projectFilter}
+                onChange={(e) => setProjectFilter(e.target.value)}
+                className="px-2 py-1 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="all">All Projects</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.title}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="flex items-center gap-2">
               <label className="text-sm text-text-muted">Priority:</label>
               <select
@@ -211,6 +254,44 @@ export function TaskList({
           </div>
         )}
       </div>
+
+      {/* Active filters indicator */}
+      {(search || statusFilter !== 'all' || priorityFilter !== 'all' || projectFilter !== 'all') && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm text-text-muted">Active filters:</span>
+          {search && (
+            <span className="px-2 py-1 text-xs bg-primary/10 text-primary rounded-md">
+              Search: "{search}"
+            </span>
+          )}
+          {statusFilter !== 'all' && (
+            <span className="px-2 py-1 text-xs bg-primary/10 text-primary rounded-md">
+              Status: {statusFilters.find(f => f.value === statusFilter)?.label}
+            </span>
+          )}
+          {priorityFilter !== 'all' && (
+            <span className="px-2 py-1 text-xs bg-primary/10 text-primary rounded-md">
+              Priority: {priorityFilter}
+            </span>
+          )}
+          {projectFilter !== 'all' && (
+            <span className="px-2 py-1 text-xs bg-primary/10 text-primary rounded-md">
+              Project: {projects.find(p => p.id === projectFilter)?.title}
+            </span>
+          )}
+          <button
+            onClick={() => {
+              setSearch('');
+              setStatusFilter('all');
+              setPriorityFilter('all');
+              setProjectFilter('all');
+            }}
+            className="text-xs text-text-muted hover:text-text underline"
+          >
+            Clear all
+          </button>
+        </div>
+      )}
 
       {/* Task list */}
       {filteredAndSortedTasks.length === 0 ? (

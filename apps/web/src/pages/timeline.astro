@@ -1,11 +1,11 @@
 ---
 import AppLayout from '../layouts/AppLayout.astro';
 import { MainLayout } from '../components/layout/MainLayout';
-import { TimelinePage } from '../components/timeline/TimelinePage';
+import { InteractiveTimelinePage } from '../components/timeline/InteractiveTimelinePage';
 ---
 
-<AppLayout title="Timeline">
+<AppLayout title="Interactive Timeline">
   <MainLayout client:load>
-    <TimelinePage client:load />
+    <InteractiveTimelinePage client:load />
   </MainLayout>
 </AppLayout>

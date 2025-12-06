@@ -106,7 +106,7 @@ function formatDate(dateStr?: string): string {
   }
 }
 
-// Parsed item card component
+// Parsed item card component - Enhanced to show project details
 function ParsedItemCard({ 
   item, 
   onRemove,
@@ -116,10 +116,16 @@ function ParsedItemCard({
   onRemove: () => void;
   onEdit: () => void;
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const isProject = item.type === 'project';
+  const projectItem = isProject ? item as ParsedProject : null;
+  const hasMilestones = projectItem?.milestones && projectItem.milestones.length > 0;
+
   return (
-    <div className="bg-surface-hover rounded-lg p-3 border border-border group hover:border-primary/50 transition-colors">
-      <div className="flex items-start gap-3">
-        <div className={`p-1.5 rounded ${
+    <div className="bg-surface-hover rounded-lg border border-border group hover:border-primary/50 transition-colors overflow-hidden">
+      {/* Main Item Header */}
+      <div className="p-3 flex items-start gap-3">
+        <div className={`p-1.5 rounded flex-shrink-0 ${
           item.type === 'task' ? 'bg-blue-500/20 text-blue-400' :
           item.type === 'habit' ? 'bg-green-500/20 text-green-400' :
           item.type === 'project' ? 'bg-purple-500/20 text-purple-400' :
@@ -130,7 +136,7 @@ function ParsedItemCard({
         
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-text truncate">{item.title}</span>
+            <span className="font-medium text-text">{item.title}</span>
             <Badge variant="secondary" className="text-xs capitalize">
               {item.type}
             </Badge>
@@ -141,6 +147,7 @@ function ParsedItemCard({
             )}
           </div>
           
+          {/* Summary stats for projects */}
           <div className="flex items-center gap-3 mt-1 text-xs text-text-muted flex-wrap">
             {item.type === 'task' && (item as ParsedTask).dueDate && (
               <span className="flex items-center gap-1">
@@ -154,41 +161,67 @@ function ParsedItemCard({
               </span>
             )}
             {item.type === 'task' && (item as ParsedTask).projectName && (
-              <span className="flex items-center gap-1">
-                📁 {(item as ParsedTask).projectName}
-              </span>
+              <span className="flex items-center gap-1">📁 {(item as ParsedTask).projectName}</span>
             )}
             {item.type === 'task' && (item as ParsedTask).estimatedMinutes && (
-              <span className="flex items-center gap-1">
-                ⏱️ {(item as ParsedTask).estimatedMinutes}min
-              </span>
+              <span className="flex items-center gap-1">⏱️ {(item as ParsedTask).estimatedMinutes}min</span>
             )}
             {item.type === 'habit' && (
-              <span className="flex items-center gap-1">
-                🔄 {(item as ParsedHabit).frequency}
-              </span>
+              <span className="flex items-center gap-1">🔄 {(item as ParsedHabit).frequency}</span>
             )}
-            {item.type === 'project' && (item as ParsedProject).deadline && (
-              <span className="flex items-center gap-1">
-                📅 Due: {formatDate((item as ParsedProject).deadline)}
-              </span>
+            {isProject && hasMilestones && (
+              <>
+                <span className="flex items-center gap-1">
+                  📋 {projectItem!.milestones.length} milestones
+                </span>
+                <span className="flex items-center gap-1">
+                  ✓ {projectItem!.milestones.reduce((sum, m) => sum + (m.tasks?.length || 0), 0)} tasks
+                </span>
+                <span className="flex items-center gap-1">
+                  ⏱️ {projectItem!.estimatedHours || projectItem!.milestones.reduce((sum, m) => sum + m.estimatedHours, 0)}h total
+                </span>
+              </>
+            )}
+            {isProject && projectItem?.deadline && (
+              <span className="flex items-center gap-1">📅 Due: {formatDate(projectItem.deadline)}</span>
             )}
             {item.type === 'goal' && (
-              <span className="flex items-center gap-1">
-                📊 {(item as ParsedGoal).timeframe}
-              </span>
+              <span className="flex items-center gap-1">📊 {(item as ParsedGoal).timeframe}</span>
             )}
           </div>
           
           {item.description && (
-            <p className="text-xs text-text-muted mt-1 line-clamp-1">{item.description}</p>
+            <p className="text-xs text-text-muted mt-1 line-clamp-2">{item.description}</p>
           )}
         </div>
         
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex gap-1">
+          {/* Expand/Collapse for projects with milestones */}
+          {hasMilestones && (
+            <button 
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="p-1 hover:bg-surface rounded text-text-muted hover:text-text"
+              title={isExpanded ? "Collapse" : "Expand to see milestones"}
+            >
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width="14" 
+                height="14" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+                className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+              >
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+          )}
           <button 
             onClick={onEdit}
-            className="p-1 hover:bg-surface rounded text-text-muted hover:text-text"
+            className="p-1 hover:bg-surface rounded text-text-muted hover:text-text opacity-0 group-hover:opacity-100 transition-opacity"
             title="Edit"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -198,7 +231,7 @@ function ParsedItemCard({
           </button>
           <button 
             onClick={onRemove}
-            className="p-1 hover:bg-surface rounded text-text-muted hover:text-danger"
+            className="p-1 hover:bg-surface rounded text-text-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity"
             title="Remove"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -208,6 +241,40 @@ function ParsedItemCard({
           </button>
         </div>
       </div>
+
+      {/* Expanded Milestone Details for Projects */}
+      {hasMilestones && isExpanded && (
+        <div className="border-t border-border bg-surface/50 p-3 space-y-3">
+          <div className="text-xs font-medium text-text-secondary uppercase tracking-wide">
+            Project Breakdown
+          </div>
+          {projectItem!.milestones.map((milestone, idx) => (
+            <div key={idx} className="pl-4 border-l-2 border-primary/30">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-primary">#{idx + 1}</span>
+                <span className="text-sm font-medium text-text">{milestone.title}</span>
+                <span className="text-xs text-text-muted">~{milestone.estimatedHours}h</span>
+              </div>
+              {milestone.description && (
+                <p className="text-xs text-text-muted mt-0.5">{milestone.description}</p>
+              )}
+              {milestone.tasks && milestone.tasks.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {milestone.tasks.map((task, tIdx) => (
+                    <div key={tIdx} className="flex items-center gap-2 text-xs">
+                      <span className="w-3 h-3 rounded border border-border flex-shrink-0"></span>
+                      <span className="text-text-secondary">{task.title}</span>
+                      {task.estimatedMinutes && (
+                        <span className="text-text-muted ml-auto">{Math.round(task.estimatedMinutes / 60 * 10) / 10}h</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

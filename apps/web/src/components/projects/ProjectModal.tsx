@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Modal, Button, Input, Textarea, Badge } from '@/components/ui';
-import type { Project, Goal } from '@totalis/shared';
+import { MilestoneList } from './MilestoneList';
+import type { Project, Goal, Task } from '@totalis/shared';
 
 interface ProjectModalProps {
   project: Project | null;
@@ -8,6 +9,7 @@ interface ProjectModalProps {
   onClose: () => void;
   onSave: (project: Partial<Project>) => Promise<void>;
   onDelete?: (projectId: string) => Promise<void>;
+  onTaskClick?: (task: Task) => void;
   goals?: Goal[];
   mode?: 'create' | 'edit';
 }
@@ -38,9 +40,11 @@ export function ProjectModal({
   onClose,
   onSave,
   onDelete,
+  onTaskClick,
   goals = [],
   mode = 'edit',
 }: ProjectModalProps) {
+  const [activeTab, setActiveTab] = useState<'details' | 'milestones'>('details');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState<Project['status']>('active');
@@ -82,6 +86,12 @@ export function ProjectModal({
       setDeadline(toDateString(project.deadline));
       setEstimatedHours(project.estimatedHours || 0);
       setTags(project.tags || []);
+      // Auto-switch to milestones tab if project has them
+      if (project.milestoneCount && project.milestoneCount > 0) {
+        setActiveTab('milestones');
+      } else {
+        setActiveTab('details');
+      }
     } else {
       // Reset for new project
       setTitle('');
@@ -92,6 +102,7 @@ export function ProjectModal({
       setDeadline('');
       setEstimatedHours(0);
       setTags([]);
+      setActiveTab('details');
     }
     setShowDeleteConfirm(false);
   }, [project, isOpen]);
@@ -151,10 +162,38 @@ export function ProjectModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={mode === 'create' ? 'Create Project' : 'Edit Project'}
+      title={mode === 'create' ? 'Create Project' : project?.title || 'Edit Project'}
       size="lg"
     >
-      <form onSubmit={handleSubmit} className="space-y-5">
+      {/* Tabs (only show in edit mode with existing project) */}
+      {mode === 'edit' && project && (
+        <div className="flex border-b border-border mb-4">
+          <button
+            onClick={() => setActiveTab('details')}
+            className={`px-4 py-2 font-medium transition-colors ${
+              activeTab === 'details'
+                ? 'text-primary border-b-2 border-primary'
+                : 'text-text-secondary hover:text-text'
+            }`}
+          >
+            Details
+          </button>
+          <button
+            onClick={() => setActiveTab('milestones')}
+            className={`px-4 py-2 font-medium transition-colors ${
+              activeTab === 'milestones'
+                ? 'text-primary border-b-2 border-primary'
+                : 'text-text-secondary hover:text-text'
+            }`}
+          >
+            Milestones {project.milestoneCount ? `(${project.milestoneCount})` : ''}
+          </button>
+        </div>
+      )}
+
+      {/* Details Tab */}
+      {activeTab === 'details' && (
+        <form onSubmit={handleSubmit} className="space-y-5">
         {/* Title */}
         <Input
           label="Project Name"
@@ -296,9 +335,31 @@ export function ProjectModal({
         {/* Delete Confirmation */}
         {showDeleteConfirm && onDelete && project?.id && (
           <div className="p-4 bg-danger/10 border border-danger/20 rounded-lg">
-            <p className="text-sm text-danger mb-3">
-              Are you sure you want to delete this project? Tasks linked to this project will be unlinked.
-            </p>
+            <div className="flex items-start gap-3 mb-3">
+              <svg className="w-5 h-5 text-danger flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-danger mb-2">
+                  Are you sure you want to delete this project?
+                </p>
+                <p className="text-sm text-text-secondary mb-2">
+                  This will permanently delete:
+                </p>
+                <ul className="text-sm text-text-secondary space-y-1 ml-4 list-disc">
+                  <li>The project: <span className="font-medium text-text">{project.title}</span></li>
+                  {project.milestoneCount > 0 && (
+                    <li><span className="font-medium text-text">{project.milestoneCount}</span> milestone{project.milestoneCount !== 1 ? 's' : ''}</li>
+                  )}
+                  {project.taskCount > 0 && (
+                    <li><span className="font-medium text-text">{project.taskCount}</span> task{project.taskCount !== 1 ? 's' : ''}</li>
+                  )}
+                </ul>
+                <p className="text-sm text-danger font-medium mt-3">
+                  ⚠️ This action cannot be undone!
+                </p>
+              </div>
+            </div>
             <div className="flex gap-2">
               <Button
                 type="button"
@@ -307,7 +368,7 @@ export function ProjectModal({
                 onClick={handleDelete}
                 isLoading={isDeleting}
               >
-                Yes, Delete
+                Yes, Delete Everything
               </Button>
               <Button
                 type="button"
@@ -349,6 +410,56 @@ export function ProjectModal({
           </div>
         </div>
       </form>
+      )}
+
+      {/* Milestones Tab */}
+      {activeTab === 'milestones' && project && (
+        <div className="space-y-4">
+          <div className="mb-4 p-4 bg-surface-hover rounded-lg border border-border">
+            <h3 className="text-lg font-semibold text-text mb-2">
+              {project.title}
+            </h3>
+            {project.description && (
+              <p className="text-sm text-text-secondary mb-3">{project.description}</p>
+            )}
+            <div className="flex gap-4 text-sm">
+              <div>
+                <span className="text-text-secondary">Progress:</span>{' '}
+                <span className="font-medium text-text">{project.progress}%</span>
+              </div>
+              <div>
+                <span className="text-text-secondary">Milestones:</span>{' '}
+                <span className="font-medium text-text">
+                  {project.completedMilestoneCount || 0} / {project.milestoneCount}
+                </span>
+              </div>
+              <div>
+                <span className="text-text-secondary">Tasks:</span>{' '}
+                <span className="font-medium text-text">
+                  {project.completedTaskCount || 0} / {project.taskCount || 0}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="max-h-[60vh] overflow-y-auto pr-2">
+            <MilestoneList projectId={project.id} onTaskClick={onTaskClick} />
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex justify-between pt-4 border-t border-border">
+            <Button 
+              variant="secondary" 
+              onClick={() => setActiveTab('details')}
+            >
+              ← View Details
+            </Button>
+            <Button variant="secondary" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }

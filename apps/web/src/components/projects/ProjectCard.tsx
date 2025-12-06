@@ -70,6 +70,31 @@ export function ProjectCard({ project, onClick, taskCount = 0, completedTaskCoun
         </div>
       </div>
 
+      {/* Milestone Preview */}
+      {project.milestoneCount && project.milestoneCount > 0 && (
+        <div className="mb-3 pb-3 border-b border-border">
+          <div className="flex items-center justify-between text-xs text-text-muted mb-2">
+            <span className="font-medium">Milestones</span>
+            <span>{project.completedMilestoneCount || 0} / {project.milestoneCount} complete</span>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {Array.from({ length: Math.min(project.milestoneCount, 5) }).map((_, i) => (
+              <div
+                key={i}
+                className={`w-2 h-2 rounded-full ${
+                  i < (project.completedMilestoneCount || 0)
+                    ? 'bg-green-500'
+                    : 'bg-border'
+                }`}
+              />
+            ))}
+            {project.milestoneCount > 5 && (
+              <span className="text-xs text-text-secondary">+{project.milestoneCount - 5} more</span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Footer */}
       <div className="flex items-center justify-between text-xs text-text-muted">
         <div className="flex items-center gap-3">

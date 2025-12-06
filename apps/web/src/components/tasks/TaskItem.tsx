@@ -24,6 +24,22 @@ const statusConfig = {
   blocked: { color: 'danger', label: 'Blocked' },
 } as const;
 
+// Safe date conversion helper
+const toSafeDate = (value: unknown): Date | null => {
+  if (!value) return null;
+  try {
+    // Handle Firestore Timestamp
+    if (typeof value === 'object' && 'toDate' in value) {
+      return (value as any).toDate();
+    }
+    const date = new Date(value as string | number);
+    if (isNaN(date.getTime())) return null;
+    return date;
+  } catch {
+    return null;
+  }
+};
+
 export function TaskItem({ task, onToggle, onClick, project, showProject = true }: TaskItemProps) {
   const [isCompleting, setIsCompleting] = useState(false);
   const isCompleted = task.status === 'completed';
@@ -34,9 +50,10 @@ export function TaskItem({ task, onToggle, onClick, project, showProject = true 
     setIsCompleting(false);
   };
 
-  const formatDueDate = (date: Date | undefined) => {
+  const formatDueDate = (dateValue: unknown) => {
+    const date = toSafeDate(dateValue);
     if (!date) return null;
-    const d = date instanceof Date ? date : new Date(date);
+    const d = date;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const dueDay = new Date(d);

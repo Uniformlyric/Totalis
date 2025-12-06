@@ -1,5 +1,6 @@
 export * from './tasks';
 export * from './projects';
+export * from './milestones';
 export * from './goals';
 export * from './habits';
 export * from './habitLogs';
