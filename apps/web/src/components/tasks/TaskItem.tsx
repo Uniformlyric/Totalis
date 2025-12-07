@@ -69,7 +69,27 @@ export function TaskItem({ task, onToggle, onClick, project, showProject = true 
   };
 
   const dueInfo = formatDueDate(task.dueDate);
-  const priority = priorityConfig[task.priority];
+  const priority = priorityConfig[task.priority as keyof typeof priorityConfig] || priorityConfig.medium;
+
+  // Format scheduled date/time
+  const formatScheduledDate = (dateValue: unknown) => {
+    const date = toSafeDate(dateValue);
+    if (!date) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const schedDay = new Date(date);
+    schedDay.setHours(0, 0, 0, 0);
+    
+    const diff = Math.floor((schedDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    
+    if (diff === 0) return `Today @ ${timeStr}`;
+    if (diff === 1) return `Tomorrow @ ${timeStr}`;
+    if (diff > 1 && diff < 7) return `${date.toLocaleDateString('en-US', { weekday: 'short' })} @ ${timeStr}`;
+    return `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} @ ${timeStr}`;
+  };
+
+  const scheduledInfo = formatScheduledDate(task.scheduledStart);
 
   return (
     <div
@@ -121,6 +141,17 @@ export function TaskItem({ task, onToggle, onClick, project, showProject = true 
 
         {/* Meta info */}
         <div className="flex items-center gap-3 mt-2 text-xs text-text-muted">
+          {/* Scheduled date/time */}
+          {scheduledInfo && (
+            <span className="flex items-center gap-1 text-blue-500">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              {scheduledInfo}
+            </span>
+          )}
+
           {/* Due date */}
           {dueInfo && (
             <span className={`flex items-center gap-1 ${dueInfo.isOverdue ? 'text-danger' : ''}`}>
@@ -149,14 +180,14 @@ export function TaskItem({ task, onToggle, onClick, project, showProject = true 
           )}
 
           {/* Tags */}
-          {task.tags.length > 0 && (
+          {(task.tags?.length ?? 0) > 0 && (
             <span className="flex items-center gap-1">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
                 <line x1="7" y1="7" x2="7.01" y2="7" />
               </svg>
-              {task.tags.slice(0, 2).join(', ')}
-              {task.tags.length > 2 && ` +${task.tags.length - 2}`}
+              {(task.tags || []).slice(0, 2).join(', ')}
+              {(task.tags?.length ?? 0) > 2 && ` +${task.tags!.length - 2}`}
             </span>
           )}
 

@@ -623,6 +623,15 @@ export function ProjectView({
                                     {milestone.title}
                                   </span>
                                 )}
+                                {task.scheduledStart && (
+                                  <span className="flex items-center gap-1 text-blue-400">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <circle cx="12" cy="12" r="10" />
+                                      <polyline points="12 6 12 12 16 14" />
+                                    </svg>
+                                    {new Date(task.scheduledStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} @ {new Date(task.scheduledStart).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                                  </span>
+                                )}
                                 {task.dueDate && (
                                   <span>Due: {new Date(task.dueDate).toLocaleDateString()}</span>
                                 )}

@@ -6,12 +6,25 @@
 import type { Task, Project, UserSettings } from '@totalis/shared';
 
 export interface SchedulingContext {
-  userWeeklyCapacity: number; // hours per week
   workingHours: { start: string; end: string }; // e.g., "09:00", "17:00"
+  workingDays: number[]; // 0=Sunday, 1=Monday, etc.
   existingTasks: Task[];
   existingProjects: Project[];
   holidays?: Date[]; // optional: dates to skip
   preferredStartDate?: Date; // optional: earliest start date
+}
+
+/**
+ * Calculate weekly capacity from working hours and working days
+ */
+export function calculateWeeklyCapacity(
+  workingHours: { start: string; end: string },
+  workingDays: number[]
+): number {
+  const [startHour, startMin] = workingHours.start.split(':').map(Number);
+  const [endHour, endMin] = workingHours.end.split(':').map(Number);
+  const hoursPerDay = (endHour * 60 + endMin - startHour * 60 - startMin) / 60;
+  return hoursPerDay * workingDays.length;
 }
 
 export interface SchedulingResult {
@@ -69,10 +82,13 @@ export function calculateOptimalSchedule(
   startDate.setHours(0, 0, 0, 0);
   result.suggestedStartDate = new Date(startDate);
 
+  // Calculate weekly capacity from working hours and days
+  const weeklyCapacity = calculateWeeklyCapacity(context.workingHours, context.workingDays);
+
   // Calculate weekly hours needed (average across project duration)
   // Aim for 50-75% capacity utilization for realistic scheduling
   const targetUtilization = 0.65; // 65% of weekly capacity
-  const hoursPerWeek = context.userWeeklyCapacity * targetUtilization;
+  const hoursPerWeek = weeklyCapacity * targetUtilization;
   const weeksNeeded = Math.ceil(taskHours / hoursPerWeek);
   
   result.weeklyHoursRequired = hoursPerWeek;
@@ -92,27 +108,27 @@ export function calculateOptimalSchedule(
       context.existingTasks
     );
 
-    const remainingCapacity = context.userWeeklyCapacity - existingHours;
+    const remainingCapacity = weeklyCapacity - existingHours;
     const hoursToSchedule = Math.min(hoursPerWeek, remainingCapacity, taskHours - (i * hoursPerWeek));
     const totalScheduled = existingHours + hoursToSchedule;
-    const utilization = (totalScheduled / context.userWeeklyCapacity) * 100;
+    const utilization = (totalScheduled / weeklyCapacity) * 100;
 
     const breakdown: WeeklyBreakdown = {
       weekStartDate: new Date(currentWeekStart),
       weekEndDate: new Date(weekEnd),
       weekLabel: formatWeekLabel(currentWeekStart),
       hoursScheduled: totalScheduled,
-      hoursAvailable: context.userWeeklyCapacity,
+      hoursAvailable: weeklyCapacity,
       utilizationPercent: Math.round(utilization),
       tasksScheduled: [{ title: 'New work', hours: hoursToSchedule }],
-      isOverbooked: totalScheduled > context.userWeeklyCapacity,
+      isOverbooked: totalScheduled > weeklyCapacity,
     };
 
     result.breakdown.push(breakdown);
 
     if (breakdown.isOverbooked) {
       result.warnings.push(
-        `Week of ${breakdown.weekLabel}: ${Math.round(totalScheduled)}h scheduled (${Math.round(totalScheduled - context.userWeeklyCapacity)}h over capacity)`
+        `Week of ${breakdown.weekLabel}: ${Math.round(totalScheduled)}h scheduled (${Math.round(totalScheduled - weeklyCapacity)}h over capacity)`
       );
       result.isOverCapacity = true;
     }
@@ -126,7 +142,7 @@ export function calculateOptimalSchedule(
   result.calculatedDeadline = lastWeek ? lastWeek.weekEndDate : new Date(startDate);
 
   // Calculate overall capacity utilization
-  const totalHoursAvailable = weeksNeeded * context.userWeeklyCapacity;
+  const totalHoursAvailable = weeksNeeded * weeklyCapacity;
   const existingTotalHours = result.breakdown.reduce((sum, w) => sum + w.hoursScheduled, 0);
   result.capacityUtilization = existingTotalHours / totalHoursAvailable;
 
@@ -284,7 +300,8 @@ function calculateWeeklyWorkload(
     if (!task.scheduledStart && !task.dueDate) return false;
     
     const taskDate = task.scheduledStart || task.dueDate;
-    const taskTime = (taskDate instanceof Date ? taskDate : new Date(taskDate)).getTime();
+    if (!taskDate) return false;
+    const taskTime = (taskDate instanceof Date ? taskDate : new Date(taskDate as any)).getTime();
     
     return taskTime >= startTime && taskTime <= endTime;
   });
@@ -327,13 +344,16 @@ export function validateDeadline(
   const hoursNeededPerWeek = requiredHours / weeksUntilDeadline;
   const currentWeeklyLoad = getCurrentWeeklyWorkload(context.existingTasks);
   const totalWeeklyLoad = currentWeeklyLoad + hoursNeededPerWeek;
+  
+  // Calculate weekly capacity from working hours and days
+  const weeklyCapacity = calculateWeeklyCapacity(context.workingHours, context.workingDays);
 
-  const isRealistic = totalWeeklyLoad <= context.userWeeklyCapacity * 0.85; // 85% threshold
+  const isRealistic = totalWeeklyLoad <= weeklyCapacity * 0.85; // 85% threshold
 
   const suggestions: string[] = [];
 
   if (!isRealistic) {
-    const weeksNeeded = Math.ceil(requiredHours / (context.userWeeklyCapacity * 0.65));
+    const weeksNeeded = Math.ceil(requiredHours / (weeklyCapacity * 0.65));
     const suggestedDeadline = new Date(now);
     suggestedDeadline.setDate(suggestedDeadline.getDate() + weeksNeeded * 7);
 
@@ -343,7 +363,7 @@ export function validateDeadline(
       `📊 This would require ${Math.round((requiredHours / weeksNeeded))}h/week at 65% capacity utilization`
     );
   } else {
-    suggestions.push(`✅ Deadline is realistic with ${Math.round((totalWeeklyLoad / context.userWeeklyCapacity) * 100)}% capacity utilization`);
+    suggestions.push(`✅ Deadline is realistic with ${Math.round((totalWeeklyLoad / weeklyCapacity) * 100)}% capacity utilization`);
   }
 
   return { isRealistic, suggestions };

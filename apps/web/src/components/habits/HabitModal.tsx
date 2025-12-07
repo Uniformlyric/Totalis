@@ -45,6 +45,8 @@ export function HabitModal({
   const [frequency, setFrequency] = useState<Habit['frequency']>('daily');
   const [daysOfWeek, setDaysOfWeek] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
   const [reminderTime, setReminderTime] = useState('');
+  const [scheduledTime, setScheduledTime] = useState('');
+  const [estimatedMinutes, setEstimatedMinutes] = useState<number>(30);
   const [color, setColor] = useState(colorOptions[0]);
   const [icon, setIcon] = useState(iconOptions[0]);
   const [targetPerDay, setTargetPerDay] = useState<number | undefined>(undefined);
@@ -60,6 +62,8 @@ export function HabitModal({
       setFrequency(habit.frequency);
       setDaysOfWeek(habit.daysOfWeek || [0, 1, 2, 3, 4, 5, 6]);
       setReminderTime(habit.reminderTime || '');
+      setScheduledTime(habit.scheduledTime || '');
+      setEstimatedMinutes(habit.estimatedMinutes || 30);
       setColor(habit.color || colorOptions[0]);
       setIcon(habit.icon || iconOptions[0]);
       setTargetPerDay(habit.targetPerDay);
@@ -70,6 +74,8 @@ export function HabitModal({
       setFrequency('daily');
       setDaysOfWeek([0, 1, 2, 3, 4, 5, 6]);
       setReminderTime('');
+      setScheduledTime('');
+      setEstimatedMinutes(30);
       setColor(colorOptions[0]);
       setIcon(iconOptions[0]);
       setTargetPerDay(undefined);
@@ -90,6 +96,8 @@ export function HabitModal({
         frequency,
         daysOfWeek: frequency === 'custom' ? daysOfWeek : undefined,
         reminderTime: reminderTime || undefined,
+        scheduledTime: scheduledTime || undefined,
+        estimatedMinutes: estimatedMinutes || 30,
         color,
         icon,
         targetPerDay: targetPerDay || undefined,
@@ -256,6 +264,51 @@ export function HabitModal({
             onChange={(e) => setReminderTime(e.target.value)}
             className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
           />
+        </div>
+
+        {/* Scheduled Time & Duration - for calendar blocking */}
+        <div className="p-4 bg-surface-hover/50 rounded-lg space-y-4">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-lg">📅</span>
+            <span className="text-sm font-medium text-text">Calendar Blocking</span>
+            <span className="text-xs text-text-muted">(shows on daily schedule)</span>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-text mb-2">
+                Scheduled Time
+              </label>
+              <input
+                type="time"
+                value={scheduledTime}
+                onChange={(e) => setScheduledTime(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="When to do this habit"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-text mb-2">
+                Duration (minutes)
+              </label>
+              <input
+                type="number"
+                value={estimatedMinutes}
+                onChange={(e) => setEstimatedMinutes(parseInt(e.target.value) || 30)}
+                min={5}
+                max={240}
+                step={5}
+                className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+          </div>
+          
+          {scheduledTime && (
+            <p className="text-xs text-text-muted">
+              ✓ This habit will appear as a {estimatedMinutes}-minute block at {scheduledTime} on the calendar
+            </p>
+          )}
         </div>
 
         {/* Target per Day */}

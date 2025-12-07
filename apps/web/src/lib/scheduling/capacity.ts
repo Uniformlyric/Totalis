@@ -13,7 +13,7 @@ export interface CapacityRange {
   totalHoursScheduled: number;
   totalHoursAvailable: number;
   averageUtilization: number;
-  overb ookedDays: number;
+  overbookedDays: number;
 }
 
 /**

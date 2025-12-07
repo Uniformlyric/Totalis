@@ -6,6 +6,7 @@ interface CalendarViewProps {
   tasks: Task[];
   habits: Habit[];
   habitLogs: HabitLog[];
+  workingHours?: { start: string; end: string };
   onDayClick?: (date: Date) => void;
   onTaskClick?: (task: Task) => void;
 }
@@ -15,9 +16,46 @@ interface DayData {
   dateString: string;
   isCurrentMonth: boolean;
   isToday: boolean;
-  tasks: Task[];
+  isWeekend: boolean;
+  tasks: Task[]; // Tasks due on this day
+  scheduledTasks: Task[]; // Tasks scheduled to work on this day
+  completedScheduledTasks: Task[]; // Completed tasks that were scheduled for this day
+  unscheduledTasks: Task[]; // Tasks due this day but not scheduled
+  tasksNeedingAttention: Task[]; // Tasks due that need scheduling or are scheduled on different day
   habitCompletions: number;
   totalHabits: number;
+  scheduledMinutes: number;
+  availableMinutes: number;
+  capacityPercent: number;
+}
+
+// Helper to parse time string to minutes
+function timeToMinutes(timeStr: string): number {
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+// Helper to get local date string (YYYY-MM-DD) without timezone issues
+function toLocalDateString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Helper to safely convert date
+function toSafeDate(value: unknown): Date | null {
+  if (!value) return null;
+  try {
+    if (typeof value === 'object' && value !== null && 'toDate' in value) {
+      return (value as { toDate: () => Date }).toDate();
+    }
+    const date = new Date(value as string | number);
+    if (isNaN(date.getTime())) return null;
+    return date;
+  } catch {
+    return null;
+  }
 }
 
 const monthNames = [
@@ -31,6 +69,7 @@ export function CalendarView({
   tasks,
   habits,
   habitLogs,
+  workingHours = { start: '09:00', end: '17:00' },
   onDayClick,
   onTaskClick,
 }: CalendarViewProps) {
@@ -43,7 +82,7 @@ export function CalendarView({
     return d;
   }, []);
 
-  const todayString = today.toISOString().split('T')[0];
+  const todayString = toLocalDateString(today);
 
   // Generate calendar grid for current month
   const calendarDays = useMemo(() => {
@@ -67,21 +106,61 @@ export function CalendarView({
     const current = new Date(startDate);
 
     while (current <= endDate) {
-      const dateString = current.toISOString().split('T')[0];
+      const dateString = toLocalDateString(current);
+      const dayOfWeek = current.getDay();
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
       
-      // Get tasks for this day
+      // Get tasks DUE on this day
       const dayTasks = tasks.filter((task) => {
         if (!task.dueDate) return false;
         try {
-          const taskDate = task.dueDate instanceof Date 
-            ? task.dueDate 
-            : new Date(task.dueDate);
-          if (isNaN(taskDate.getTime())) return false;
-          return taskDate.toISOString().split('T')[0] === dateString;
+          const taskDate = toSafeDate(task.dueDate);
+          if (!taskDate) return false;
+          return toLocalDateString(taskDate) === dateString;
         } catch {
           return false;
         }
       });
+      
+      // Get tasks SCHEDULED to work on this day
+      const scheduledTasks = tasks.filter((task) => {
+        if (!task.scheduledStart) return false;
+        try {
+          const schedDate = toSafeDate(task.scheduledStart);
+          if (!schedDate) return false;
+          return toLocalDateString(schedDate) === dateString;
+        } catch {
+          return false;
+        }
+      });
+      
+      // Get unscheduled tasks (due on this day but not scheduled anywhere)
+      const unscheduledTasks = dayTasks.filter(t => 
+        !t.scheduledStart && t.status !== 'completed'
+      );
+      
+      // Get completed tasks scheduled for this day
+      const completedScheduledTasks = scheduledTasks.filter(t => t.status === 'completed');
+      
+      // Tasks due on this day that need attention (not completed, either unscheduled or scheduled on a DIFFERENT day)
+      const tasksNeedingAttention = dayTasks.filter(t => {
+        if (t.status === 'completed') return false;
+        if (!t.scheduledStart) return true; // Unscheduled = needs attention
+        // Check if scheduled on a different day than due
+        const schedDate = toSafeDate(t.scheduledStart);
+        if (!schedDate) return true;
+        return toLocalDateString(schedDate) !== dateString;
+      });
+      
+      // Calculate capacity
+      const workStart = timeToMinutes(workingHours.start);
+      const workEnd = timeToMinutes(workingHours.end);
+      const availableMinutes = isWeekend ? 0 : (workEnd - workStart);
+      const scheduledMinutes = scheduledTasks.reduce((sum, t) => sum + (t.estimatedMinutes || 30), 0);
+      // Don't cap at 100 - we need to know if overbooked
+      const capacityPercent = availableMinutes > 0 
+        ? Math.round((scheduledMinutes / availableMinutes) * 100)
+        : 0;
 
       // Get habit completions for this day
       const dayHabitLogs = habitLogs.filter((log) => log.date === dateString);
@@ -92,16 +171,24 @@ export function CalendarView({
         dateString,
         isCurrentMonth: current.getMonth() === month,
         isToday: dateString === todayString,
+        isWeekend,
         tasks: dayTasks,
+        scheduledTasks,
+        completedScheduledTasks,
+        unscheduledTasks,
+        tasksNeedingAttention,
         habitCompletions,
         totalHabits: habits.length,
+        scheduledMinutes,
+        availableMinutes,
+        capacityPercent,
       });
 
       current.setDate(current.getDate() + 1);
     }
 
     return days;
-  }, [currentDate, tasks, habits, habitLogs, todayString]);
+  }, [currentDate, tasks, habits, habitLogs, todayString, workingHours]);
 
   const goToPreviousMonth = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
@@ -177,28 +264,44 @@ export function CalendarView({
         <div className="grid grid-cols-7">
           {calendarDays.map((day, index) => {
             const hasTasks = day.tasks.length > 0;
+            const hasScheduledTasks = day.scheduledTasks.length > 0;
+            const hasUnscheduledTasks = day.unscheduledTasks.length > 0;
+            const hasCompletedTasks = day.completedScheduledTasks.length > 0;
+            const pendingScheduledTasks = day.scheduledTasks.length - day.completedScheduledTasks.length;
+            const allScheduledComplete = hasScheduledTasks && pendingScheduledTasks === 0;
             const hasOverdue = day.tasks.some(
-              (t) => t.status !== 'completed' && new Date(t.dueDate!) < today
+              (t) => t.status !== 'completed' && toSafeDate(t.dueDate)! < today
             );
             const hasHabits = day.habitCompletions > 0;
             const allHabitsComplete = day.habitCompletions === day.totalHabits && day.totalHabits > 0;
+            
+            // Capacity color
+            const getCapacityColor = (percent: number) => {
+              if (percent === 0) return 'bg-gray-200 dark:bg-gray-700';
+              if (percent <= 50) return 'bg-emerald-400';
+              if (percent <= 80) return 'bg-amber-400';
+              if (percent <= 100) return 'bg-orange-500';
+              return 'bg-red-500';
+            };
 
             return (
               <button
                 key={day.dateString}
                 onClick={() => handleDayClick(day)}
                 className={`
-                  min-h-[80px] p-2 border-b border-r border-border text-left
+                  h-[110px] p-2 border-b border-r border-border text-left relative flex flex-col
                   transition-colors hover:bg-surface-hover
                   ${!day.isCurrentMonth ? 'opacity-40' : ''}
                   ${selectedDate === day.dateString ? 'bg-primary/10' : ''}
                   ${index % 7 === 6 ? 'border-r-0' : ''}
+                  ${day.isWeekend && day.isCurrentMonth ? 'bg-surface-hover/30' : ''}
                 `}
               >
-                <div className="flex items-start justify-between">
+                {/* Fixed header row - always at top */}
+                <div className="flex items-center justify-between flex-shrink-0">
                   <span
                     className={`
-                      inline-flex items-center justify-center w-7 h-7 rounded-full text-sm font-medium
+                      inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium
                       ${day.isToday
                         ? 'bg-primary text-white'
                         : 'text-text'
@@ -208,43 +311,85 @@ export function CalendarView({
                     {day.date.getDate()}
                   </span>
 
-                  {/* Habit indicator */}
-                  {hasHabits && day.isCurrentMonth && (
-                    <span
-                      className={`
-                        w-2 h-2 rounded-full
-                        ${allHabitsComplete ? 'bg-success' : 'bg-warning'}
-                      `}
-                    />
+                  {/* Status indicators */}
+                  <div className="flex items-center gap-1">
+                    {/* All scheduled tasks completed indicator */}
+                    {allScheduledComplete && day.isCurrentMonth && (
+                      <span 
+                        className="w-2 h-2 rounded-full bg-emerald-500" 
+                        title="All scheduled tasks completed!"
+                      />
+                    )}
+                    
+                    {/* Unscheduled tasks indicator */}
+                    {hasUnscheduledTasks && day.isCurrentMonth && (
+                      <span 
+                        className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" 
+                        title={`${day.unscheduledTasks.length} unscheduled task(s)`}
+                      />
+                    )}
+                    
+                    {/* Habit indicator */}
+                    {hasHabits && day.isCurrentMonth && (
+                      <span
+                        className={`
+                          w-2 h-2 rounded-full
+                          ${allHabitsComplete ? 'bg-success' : 'bg-warning'}
+                        `}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Fixed capacity bar row - always same position */}
+                <div className="h-5 flex-shrink-0 mt-1">
+                  {day.isCurrentMonth && !day.isWeekend ? (
+                    <>
+                      <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all ${getCapacityColor(day.capacityPercent)}`}
+                          style={{ width: `${day.capacityPercent > 100 ? '100%' : `${day.capacityPercent}%`}` }}
+                        />
+                      </div>
+                      <div className={`text-[9px] mt-0.5 ${day.capacityPercent > 100 ? 'text-red-500 font-medium' : 'text-text-muted'}`}>
+                        {hasScheduledTasks 
+                          ? `${Math.round(day.scheduledMinutes / 60 * 10) / 10}h / ${Math.round(day.availableMinutes / 60)}h${day.capacityPercent > 100 ? ' ⚠️' : ''}`
+                          : `${Math.round(day.availableMinutes / 60)}h avail`
+                        }
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-[9px] text-text-muted">Weekend</div>
                   )}
                 </div>
 
-                {/* Task indicators */}
-                {hasTasks && day.isCurrentMonth && (
-                  <div className="mt-1 space-y-0.5">
-                    {day.tasks.slice(0, 2).map((task) => (
-                      <div
-                        key={task.id}
-                        className={`
-                          text-[10px] px-1.5 py-0.5 rounded truncate
-                          ${task.status === 'completed'
-                            ? 'bg-success/20 text-success line-through'
-                            : hasOverdue && new Date(task.dueDate!) < today
-                              ? 'bg-danger/20 text-danger'
-                              : 'bg-primary/20 text-primary'
-                          }
-                        `}
-                      >
-                        {task.title}
-                      </div>
-                    ))}
-                    {day.tasks.length > 2 && (
-                      <div className="text-[10px] text-text-muted px-1.5">
-                        +{day.tasks.length - 2} more
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* Scrollable content area - fills remaining space */}
+                <div className="flex-1 mt-1 overflow-hidden">
+                  {day.isCurrentMonth && (
+                    <div className="space-y-0.5">
+                      {/* Completed tasks badge */}
+                      {hasCompletedTasks && (
+                        <div className="text-[9px] px-1 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-medium truncate">
+                          ✅ {day.completedScheduledTasks.length} completed
+                        </div>
+                      )}
+                      
+                      {/* Scheduled badge - only show pending tasks */}
+                      {pendingScheduledTasks > 0 && (
+                        <div className="text-[9px] px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium truncate">
+                          📋 {pendingScheduledTasks} scheduled
+                        </div>
+                      )}
+                      
+                      {/* Due tasks - only show if there are tasks needing attention */}
+                      {day.tasksNeedingAttention.length > 0 && (
+                        <div className="text-[9px] px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 truncate">
+                          ⚠️ {day.tasksNeedingAttention.length} due
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </button>
             );
           })}
@@ -262,48 +407,133 @@ export function CalendarView({
             })}
           </h3>
 
-          {/* Tasks for selected day */}
-          {selectedDayData.tasks.length > 0 ? (
-            <div className="space-y-2">
-              <h4 className="text-sm font-medium text-text-secondary">Tasks</h4>
-              {selectedDayData.tasks.map((task) => (
-                <button
-                  key={task.id}
-                  onClick={() => onTaskClick?.(task)}
-                  className={`
-                    w-full text-left p-3 rounded-lg border transition-colors
-                    ${task.status === 'completed'
-                      ? 'bg-success/5 border-success/30'
-                      : 'bg-surface-hover border-border hover:border-primary/30'
-                    }
-                  `}
-                >
-                  <div className="flex items-center justify-between">
-                    <span
-                      className={`font-medium ${
-                        task.status === 'completed' ? 'line-through text-text-muted' : 'text-text'
-                      }`}
-                    >
-                      {task.title}
-                    </span>
-                    <Badge
-                      variant={
-                        task.priority === 'urgent'
-                          ? 'danger'
-                          : task.priority === 'high'
-                            ? 'warning'
-                            : 'secondary'
+          {/* Scheduled Tasks for this day */}
+          {selectedDayData.scheduledTasks.length > 0 && (
+            <div className="space-y-2 mb-4">
+              <h4 className="text-sm font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                📋 Scheduled to work on ({selectedDayData.scheduledTasks.length})
+              </h4>
+              {selectedDayData.scheduledTasks.map((task) => {
+                const schedStart = toSafeDate(task.scheduledStart);
+                const dueDate = toSafeDate(task.dueDate);
+                return (
+                  <button
+                    key={`sched-${task.id}`}
+                    onClick={() => onTaskClick?.(task)}
+                    className={`
+                      w-full text-left p-3 rounded-lg border transition-colors
+                      ${task.status === 'completed'
+                        ? 'bg-success/5 border-success/30'
+                        : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 hover:border-primary/30'
                       }
-                      size="sm"
-                    >
-                      {task.priority}
-                    </Badge>
-                  </div>
-                </button>
-              ))}
+                    `}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span
+                        className={`font-medium ${
+                          task.status === 'completed' ? 'line-through text-text-muted' : 'text-text'
+                        }`}
+                      >
+                        {task.title}
+                      </span>
+                      <Badge
+                        variant={
+                          task.priority === 'urgent'
+                            ? 'danger'
+                            : task.priority === 'high'
+                              ? 'warning'
+                              : 'secondary'
+                        }
+                        size="sm"
+                      >
+                        {task.priority}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-text-secondary">
+                      {schedStart && (
+                        <span>⏰ {schedStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+                      )}
+                      {dueDate && (
+                        <span className="text-amber-600 dark:text-amber-400">
+                          📌 Due: {dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
+                      )}
+                      {task.estimatedMinutes && (
+                        <span>~{task.estimatedMinutes}min</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-          ) : (
-            <p className="text-sm text-text-muted">No tasks scheduled for this day</p>
+          )}
+
+          {/* Tasks DUE on this day */}
+          {selectedDayData.tasks.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                📌 Due on this day ({selectedDayData.tasks.length})
+              </h4>
+              {selectedDayData.tasks.map((task) => {
+                const schedStart = toSafeDate(task.scheduledStart);
+                const isScheduledOnDifferentDay = schedStart && 
+                  toLocalDateString(schedStart) !== selectedDayData.dateString;
+                return (
+                  <button
+                    key={`due-${task.id}`}
+                    onClick={() => onTaskClick?.(task)}
+                    className={`
+                      w-full text-left p-3 rounded-lg border transition-colors
+                      ${task.status === 'completed'
+                        ? 'bg-success/5 border-success/30'
+                        : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 hover:border-primary/30'
+                      }
+                    `}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span
+                        className={`font-medium ${
+                          task.status === 'completed' ? 'line-through text-text-muted' : 'text-text'
+                        }`}
+                      >
+                        {task.title}
+                      </span>
+                      <Badge
+                        variant={
+                          task.priority === 'urgent'
+                            ? 'danger'
+                            : task.priority === 'high'
+                              ? 'warning'
+                              : 'secondary'
+                        }
+                        size="sm"
+                      >
+                        {task.priority}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-text-secondary">
+                      {schedStart ? (
+                        <span className={isScheduledOnDifferentDay ? 'text-blue-600 dark:text-blue-400' : ''}>
+                          ⏰ Scheduled: {schedStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          {' at '}
+                          {schedStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                        </span>
+                      ) : (
+                        <span className="text-red-500 font-medium">⚠️ Not yet scheduled</span>
+                      )}
+                      {task.estimatedMinutes && (
+                        <span>~{task.estimatedMinutes}min</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Empty state */}
+          {selectedDayData.tasks.length === 0 && selectedDayData.scheduledTasks.length === 0 && (
+            <p className="text-sm text-text-muted">No tasks due or scheduled for this day</p>
           )}
 
           {/* Habit summary */}
@@ -319,22 +549,43 @@ export function CalendarView({
       )}
 
       {/* Legend */}
-      <div className="flex items-center gap-4 text-xs text-text-muted">
+      <div className="flex flex-wrap items-center gap-4 text-xs text-text-muted">
         <div className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-primary/20" />
-          <span>Task due</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-success/20" />
+          <span className="w-3 h-3 rounded bg-emerald-100 dark:bg-emerald-900/30" />
           <span>Completed</span>
         </div>
         <div className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-danger/20" />
-          <span>Overdue</span>
+          <span className="w-3 h-3 rounded bg-blue-100 dark:bg-blue-900/30" />
+          <span>Scheduled</span>
         </div>
         <div className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-success" />
-          <span>All habits done</span>
+          <span className="w-3 h-3 rounded bg-amber-100 dark:bg-amber-900/30" />
+          <span>Due</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+          <span>All done</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+          <span>Needs scheduling</span>
+        </div>
+        <span className="text-text-muted/50">|</span>
+        <div className="flex items-center gap-1">
+          <span className="w-6 h-1.5 rounded-full bg-emerald-400" />
+          <span>&lt;50%</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="w-6 h-1.5 rounded-full bg-amber-400" />
+          <span>50-80%</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="w-6 h-1.5 rounded-full bg-orange-500" />
+          <span>80-100%</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="w-6 h-1.5 rounded-full bg-red-500" />
+          <span>Over</span>
         </div>
       </div>
     </div>

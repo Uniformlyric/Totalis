@@ -161,7 +161,7 @@ export function LoginForm() {
                       pushNotifications: true,
                     },
                     workingHours: { start: '09:00', end: '17:00' },
-                    weeklyCapacity: 40,
+                    workingDays: [1, 2, 3, 4, 5], // Mon-Fri
                     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                   },
                   createdAt: now,

@@ -159,14 +159,19 @@
 - ✅ 1.6 Deploy Rules
 
 ### Phase 2: Timeline Enhancement
-**Progress:** 25% complete ✅ (1/4 tasks done)
+**Progress:** 75% complete ✅ (3/4 tasks done)
 - ✅ 2.1 Interactive Timeline with Drag-and-Drop
-- ⏳ 2.2 Capacity Visualization (in progress)
-- ⏳ 2.3 Milestone Markers (in progress)
+- ✅ 2.2 Capacity Visualization
+- ✅ 2.3 Milestone Markers
 - ⏳ 2.4 Dependency Lines (planned)
 
 ### Phase 3: Calendar Functionality
-**Progress:** 0% complete (not started)
+**Progress:** 20% complete ✅ (1/5 tasks done)
+- ✅ 3.1 Time Blocking View
+- ⏳ 3.2 Drag-and-Drop Scheduling (in progress)
+- ⏳ 3.3 Quick Task Creation (in progress)
+- ⏳ 3.4 Focus Mode Integration (planned)
+- ⏳ 3.5 Calendar Filters (planned)
 
 ### Phase 4: Gmail Integration
 **Progress:** 0% complete (not started)
@@ -272,6 +277,106 @@
 ---
 
 ## 🔄 Daily Update
+
+### Date: December 7, 2025 (Part 3 - AI Auto-Scheduling)
+
+**What I worked on:**
+- Fixed drag-and-drop task scheduling (Date → Firestore Timestamp conversion)
+- Created comprehensive AI-powered auto-scheduling system
+
+**What I completed:**
+- ✅ **Fixed**: Drag-and-drop now properly persists to Firestore
+  - Convert Date objects to Firestore Timestamps before saving
+  - Tasks now stick to calendar after dragging
+- ✅ **NEW FEATURE**: AI Auto-Schedule Day 🤖
+  - "Auto-Schedule Day" button in day view
+  - AI analyzes all unscheduled tasks for selected day
+  - Considers priorities, estimated times, existing schedule
+  - Respects working hours and capacity limits
+  - Includes breaks between tasks
+  - Smart scheduling: urgent tasks early, complex tasks in morning
+  - Returns schedule with reasoning for each time slot
+  - Automatically updates all tasks in Firestore
+- ✅ **NEW FEATURE**: Suggest Next Task 💡
+  - "Suggest Next" button in unscheduled sidebar
+  - AI recommends most important task to work on right now
+  - Considers priority, due date, current time
+  - Highlights suggested task in sidebar
+  - Perfect for "what should I do next?" moments
+
+**Files Created:**
+- `auto-scheduler.ts` (~300 lines) - Complete AI scheduling engine
+
+**Files Modified:**
+- `CalendarPage.tsx` - Added auto-schedule handler, Timestamp conversion fix
+- `TimeBlockView.tsx` - Added suggest next button and highlighted suggestion
+- `PROGRESS.md` - Updated with AI auto-scheduling completion
+
+**AI Scheduling Features:**
+- Batch schedule entire day in seconds
+- Smart time allocation based on task complexity
+- Automatic break insertion (5-10 mins between tasks)
+- Capacity warnings if day is overbooked
+- Priority-based scheduling (urgent/high first)
+- Mental energy consideration (hard tasks in morning)
+- Respects already-scheduled blocks
+- Week scheduling capability (for future use)
+
+**Blockers:**
+- None!
+
+**Next up:**
+- Test AI auto-scheduling with real scenarios
+- Add week-level auto-scheduling
+- Consider adding "Optimize My Week" feature
+- Phase 4 planning (Gmail integration)
+
+---
+
+### Previous Updates
+
+**What I worked on:**
+- Phase 3.1: Time Blocking Calendar View
+
+**What I completed:**
+- ✅ **Phase 3.1 COMPLETE:** Time blocking day view with drag-and-drop
+  - Hour-by-hour view from 6 AM to 11 PM (30-minute increments)
+  - Drag-and-drop tasks from unscheduled sidebar to time slots
+  - Real-time capacity tracking and warnings
+  - Color-coded working hours vs non-working hours
+  - Capacity stats: scheduled vs available hours, utilization percentage
+  - Overbooked warnings when > 100% capacity
+  - Near capacity warnings when > 80%
+  - Visual feedback during drag (ghost element overlay)
+  - Click empty time slots to create new tasks
+  - Auto-scroll to current time on page load
+  - Collapsible unscheduled tasks sidebar
+  - Task cards show priority, estimated time, completion status
+  - Proper pointer sensor with 8px activation distance
+  - Working hours integration with user settings
+  - Month/Day view mode toggle in calendar
+  - Seamless navigation between month and day views
+
+**Files Created:**
+- `TimeBlockView.tsx` (~550 lines)
+
+**Files Modified:**
+- `CalendarPage.tsx` - Added view mode toggling, day view integration
+- `calendar/index.ts` - Exported TimeBlockView
+- `PROGRESS.md` - Updated Phase 2 to 75% and Phase 3 to 20%
+
+**Blockers:**
+- None!
+
+**Next up:**
+- Test time blocking with real tasks
+- Add week view
+- Consider adding recurring task templates
+- Phase 4 planning (Gmail integration)
+
+---
+
+### Previous Updates
 
 ### Date: December 7, 2025
 

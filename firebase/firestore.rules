@@ -13,6 +13,10 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if isOwner(userId);
       
+      match /settings/{settingsId} {
+        allow read, write: if isOwner(userId);
+      }
+      
       match /goals/{goalId} {
         allow read, write: if isOwner(userId);
       }
@@ -50,6 +54,10 @@ service cloud.firestore {
       }
       
       match /notifications/{notificationId} {
+        allow read, write: if isOwner(userId);
+      }
+      
+      match /integrations/{integrationId} {
         allow read, write: if isOwner(userId);
       }
     }

@@ -76,15 +76,15 @@ export function TaskModal({
   // Reset form when task changes
   useEffect(() => {
     if (task) {
-      setTitle(task.title);
+      setTitle(task.title || '');
       setDescription(task.description || '');
-      setPriority(task.priority);
-      setStatus(task.status);
+      setPriority(task.priority || 'medium');
+      setStatus(task.status || 'pending');
       setProjectId(task.projectId || '');
       setMilestoneId(task.milestoneId || '');
       setDueDate(toDateString(task.dueDate));
-      setEstimatedMinutes(task.estimatedMinutes);
-      setTags(task.tags);
+      setEstimatedMinutes(task.estimatedMinutes || 30);
+      setTags(Array.isArray(task.tags) ? task.tags : []);
     } else {
       // Reset for new task
       setTitle('');

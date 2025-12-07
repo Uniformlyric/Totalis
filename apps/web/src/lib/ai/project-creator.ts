@@ -44,6 +44,7 @@ export async function createProjectWithMilestones(
     description: parsedProject.description,
     deadline: parsedProject.deadline ? new Date(parsedProject.deadline) : undefined,
     estimatedHours: parsedProject.estimatedHours || 0,
+    actualHours: 0,
     status: 'active',
     progress: 0,
     taskCount: 0,
@@ -71,7 +72,7 @@ export async function createProjectWithMilestones(
       taskCount: milestone.tasks?.length || 0,
       completedTaskCount: 0,
       actualHours: 0,
-      dependencies: milestone.dependencies || [],
+      dependencies: (milestone.dependencies || []).map(d => String(d)),
     }));
 
     const milestoneIds = await createMilestones(milestonesToCreate);
@@ -105,7 +106,6 @@ export async function createProjectWithMilestones(
             blockedBy: [],
             blocking: [],
             reminders: [],
-            syncStatus: 'synced',
           });
 
           console.log(`  ✓ Created task "${taskData.title}" with milestoneId: ${milestoneId}`);
@@ -140,11 +140,18 @@ export async function createProjectWithMilestones(
 export function calculateMilestoneSchedule(
   milestones: ParsedMilestone[],
   projectDeadline?: Date,
-  userWeeklyCapacity: number = 40
+  workingHours: { start: string; end: string } = { start: '09:00', end: '17:00' },
+  workingDays: number[] = [1, 2, 3, 4, 5]
 ): Map<number, { startDate: Date; endDate: Date }> {
   const schedule = new Map<number, { startDate: Date; endDate: Date }>();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  // Calculate weekly capacity from working hours and days
+  const [startHour, startMin] = workingHours.start.split(':').map(Number);
+  const [endHour, endMin] = workingHours.end.split(':').map(Number);
+  const hoursPerDay = (endHour * 60 + endMin - startHour * 60 - startMin) / 60;
+  const weeklyCapacity = hoursPerDay * workingDays.length;
 
   // Simple forward scheduling
   let currentDate = new Date(today);
@@ -163,7 +170,7 @@ export function calculateMilestoneSchedule(
     }
 
     // Calculate duration based on hours and capacity
-    const weeksNeeded = Math.ceil(milestone.estimatedHours / userWeeklyCapacity);
+    const weeksNeeded = Math.ceil(milestone.estimatedHours / weeklyCapacity);
     const daysNeeded = weeksNeeded * 7;
 
     const startDate = new Date(currentDate);

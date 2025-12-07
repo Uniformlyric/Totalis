@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, Button, Input, Badge } from '@/components/ui';
 import type { User } from 'firebase/auth';
 import type { UserSettings } from '@totalis/shared';
-import { doc, setDoc, getDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { doc, setDoc, getDoc, arrayUnion } from 'firebase/firestore';
 import { 
   isPushSupported, 
   getNotificationPermission, 
@@ -12,6 +12,8 @@ import {
   showLocalNotification
 } from '@/lib/push';
 import { exportAndDownload } from '@/lib/export';
+import type { GmailConnectionStatus } from '@/lib/integrations/gmail';
+import type { EmailAnalysisResult } from '@/lib/ai/email-analyzer';
 
 interface ToggleSwitchProps {
   enabled: boolean;
@@ -56,7 +58,7 @@ const defaultSettings: UserSettings = {
     pushNotifications: false,
   },
   workingHours: { start: '09:00', end: '17:00' },
-  weeklyCapacity: 40,
+  workingDays: [1, 2, 3, 4, 5], // Monday-Friday by default
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 };
 
@@ -75,6 +77,17 @@ export function SettingsPage() {
   const [pushPermission, setPushPermission] = useState<NotificationPermission>('default');
   const [isSubscribingPush, setIsSubscribingPush] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  
+  // Gmail integration state
+  const [gmailStatus, setGmailStatus] = useState<GmailConnectionStatus>({ connected: false });
+  const [isCheckingGmail, setIsCheckingGmail] = useState(true);
+  const [isConnectingGmail, setIsConnectingGmail] = useState(false);
+  const [isScanningEmails, setIsScanningEmails] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{ step: string; current: number; total: number } | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<EmailAnalysisResult | null>(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [isImporting, setIsImporting] = useState(false);
 
   // Save settings to Firestore
   const saveSettingsToFirestore = useCallback(async (newSettings: UserSettings, userId: string) => {
@@ -365,6 +378,227 @@ export function SettingsPage() {
     }
   };
 
+  // Gmail integration handlers
+  useEffect(() => {
+    const checkGmailConnection = async () => {
+      if (!user) return;
+      setIsCheckingGmail(true);
+      try {
+        const { GmailService } = await import('@/lib/integrations/gmail');
+        const gmailService = new GmailService(user.uid);
+        const status = await gmailService.getConnectionStatus();
+        setGmailStatus(status);
+      } catch (err) {
+        console.error('Failed to check Gmail connection:', err);
+      } finally {
+        setIsCheckingGmail(false);
+      }
+    };
+    checkGmailConnection();
+  }, [user]);
+
+  const handleGmailConnect = async () => {
+    if (!user || isConnectingGmail) return;
+    setIsConnectingGmail(true);
+    try {
+      const { GmailService } = await import('@/lib/integrations/gmail');
+      const gmailService = new GmailService(user.uid);
+      const status = await gmailService.connect();
+      setGmailStatus(status);
+      if (status.connected) {
+        setSaveMessage({ type: 'success', text: 'Gmail connected successfully!' });
+        setTimeout(() => setSaveMessage(null), 3000);
+      }
+    } catch (err) {
+      console.error('Gmail connect failed:', err);
+      setSaveMessage({ type: 'error', text: 'Failed to connect Gmail' });
+      setTimeout(() => setSaveMessage(null), 3000);
+    } finally {
+      setIsConnectingGmail(false);
+    }
+  };
+
+  const handleGmailDisconnect = async () => {
+    if (!user) return;
+    const confirmed = window.confirm('Disconnect Gmail? You can reconnect anytime.');
+    if (!confirmed) return;
+    
+    try {
+      const { GmailService } = await import('@/lib/integrations/gmail');
+      const gmailService = new GmailService(user.uid);
+      await gmailService.disconnect();
+      setGmailStatus({ connected: false });
+      setSaveMessage({ type: 'success', text: 'Gmail disconnected' });
+      setTimeout(() => setSaveMessage(null), 3000);
+    } catch (err) {
+      console.error('Gmail disconnect failed:', err);
+      setSaveMessage({ type: 'error', text: 'Failed to disconnect Gmail' });
+      setTimeout(() => setSaveMessage(null), 3000);
+    }
+  };
+
+  const handleScanEmails = async (range: 'week' | '3months') => {
+    if (!user || isScanningEmails) return;
+    setIsScanningEmails(true);
+    setScanProgress({ step: 'Connecting to Gmail...', current: 0, total: 4 });
+    
+    try {
+      const { GmailService } = await import('@/lib/integrations/gmail');
+      const { analyzeEmails, loadExistingItems } = await import('@/lib/ai/email-analyzer');
+      
+      const gmailService = new GmailService(user.uid);
+      
+      // Calculate date range
+      const now = new Date();
+      const startDate = new Date();
+      if (range === 'week') {
+        startDate.setDate(now.getDate() - 7);
+      } else {
+        startDate.setMonth(now.getMonth() - 3);
+      }
+      
+      setScanProgress({ step: 'Fetching emails...', current: 1, total: 4 });
+      const emails = await gmailService.fetchEmails(startDate, now);
+      
+      if (emails.length === 0) {
+        setSaveMessage({ type: 'success', text: 'No new emails to scan' });
+        setTimeout(() => setSaveMessage(null), 3000);
+        setIsScanningEmails(false);
+        setScanProgress(null);
+        return;
+      }
+      
+      setScanProgress({ step: 'Loading existing items...', current: 2, total: 4 });
+      const existingItems = await loadExistingItems(user.uid);
+      
+      setScanProgress({ step: `Analyzing ${emails.length} emails with AI...`, current: 3, total: 4 });
+      const result = await analyzeEmails(emails, existingItems);
+      
+      setScanProgress({ step: 'Done!', current: 4, total: 4 });
+      
+      if (result.items.length === 0) {
+        setSaveMessage({ type: 'success', text: 'No actionable items found in emails' });
+        setTimeout(() => setSaveMessage(null), 3000);
+      } else {
+        setAnalysisResult(result);
+        setSelectedItems(new Set(result.items.map(item => item.id)));
+        setShowReviewModal(true);
+      }
+    } catch (err) {
+      console.error('Email scan failed:', err);
+      setSaveMessage({ type: 'error', text: 'Failed to scan emails. Please try again.' });
+      setTimeout(() => setSaveMessage(null), 3000);
+    } finally {
+      setIsScanningEmails(false);
+      setScanProgress(null);
+    }
+  };
+
+  const handleImportSelectedItems = async () => {
+    if (!user || !analysisResult || isImporting) return;
+    
+    const itemsToImport = analysisResult.items.filter(item => selectedItems.has(item.id));
+    if (itemsToImport.length === 0) {
+      setSaveMessage({ type: 'error', text: 'No items selected' });
+      setTimeout(() => setSaveMessage(null), 3000);
+      return;
+    }
+    
+    setIsImporting(true);
+    try {
+      const { getDb } = await import('@/lib/firebase');
+      const { collection, addDoc, Timestamp } = await import('firebase/firestore');
+      const { GmailService } = await import('@/lib/integrations/gmail');
+      
+      const db = getDb();
+      const gmailService = new GmailService(user.uid);
+      let importedCount = 0;
+      const emailIdsToMark: string[] = [];
+      
+      for (const item of itemsToImport) {
+        try {
+          const baseData = {
+            userId: user.uid,
+            title: item.title,
+            description: item.description || '',
+            priority: item.priority,
+            status: 'not_started' as const,
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+            emailSource: {
+              emailId: item.emailId,
+              subject: item.sourceSubject,
+              sender: item.senderName,
+              importedAt: Timestamp.now()
+            }
+          };
+          
+          if (item.type === 'task') {
+            const taskData: Record<string, any> = {
+              ...baseData,
+              type: 'task',
+              estimatedMinutes: item.estimatedMinutes || 30,
+              estimatedSource: 'ai',
+              actualMinutes: 0,
+              blockedBy: [],
+              blocking: [],
+              reminders: [],
+              tags: ['email-import'],
+              syncStatus: 'synced'
+            };
+            // Only add dueDate if it exists (Firestore doesn't accept undefined)
+            if (item.deadline) {
+              taskData.dueDate = Timestamp.fromDate(new Date(item.deadline));
+            }
+            await addDoc(collection(db, 'users', user.uid, 'tasks'), taskData);
+          } else if (item.type === 'project') {
+            const projectData: Record<string, any> = {
+              ...baseData,
+              type: 'project',
+              milestones: [],
+              dependencies: [],
+              progress: 0,
+              taskCount: 0,
+              completedTaskCount: 0,
+              actualHours: 0,
+              tags: ['email-import'],
+              syncStatus: 'synced'
+            };
+            await addDoc(collection(db, 'users', user.uid, 'projects'), projectData);
+          }
+          // Add goal/habit support here if needed
+          
+          if (item.emailId) {
+            emailIdsToMark.push(item.emailId);
+          }
+          importedCount++;
+        } catch (err) {
+          console.error('Failed to import item:', item.title, err);
+        }
+      }
+      
+      // Mark emails as processed
+      if (emailIdsToMark.length > 0) {
+        await gmailService.markEmailsAsProcessed(emailIdsToMark);
+      }
+      
+      setShowReviewModal(false);
+      setAnalysisResult(null);
+      setSelectedItems(new Set());
+      setSaveMessage({ 
+        type: 'success', 
+        text: `Imported ${importedCount} item${importedCount !== 1 ? 's' : ''} from emails!` 
+      });
+      setTimeout(() => setSaveMessage(null), 4000);
+    } catch (err) {
+      console.error('Import failed:', err);
+      setSaveMessage({ type: 'error', text: 'Failed to import items' });
+      setTimeout(() => setSaveMessage(null), 3000);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   // Show loading while checking auth or loading settings
   if (!authChecked || isLoading) {
     return (
@@ -588,26 +822,156 @@ export function SettingsPage() {
                 />
               </div>
             </div>
+            
+            {/* Working Days Selection */}
             <div>
-              <label className="block text-sm font-medium text-text mb-2">
-                Weekly Capacity (hours)
-              </label>
-              <Input
-                type="number"
-                min={1}
-                max={168}
-                value={settings.weeklyCapacity}
-                onChange={(e) => updateSettings(prev => ({
-                  ...prev,
-                  weeklyCapacity: parseInt(e.target.value) || 40
-                }))}
-                className="w-24"
-              />
+              <label className="block text-sm font-medium text-text mb-2">Working Days</label>
+              <p className="text-sm text-text-secondary mb-3">Select the days you're available to work</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { day: 0, label: 'Sun' },
+                  { day: 1, label: 'Mon' },
+                  { day: 2, label: 'Tue' },
+                  { day: 3, label: 'Wed' },
+                  { day: 4, label: 'Thu' },
+                  { day: 5, label: 'Fri' },
+                  { day: 6, label: 'Sat' },
+                ].map(({ day, label }) => {
+                  const isSelected = (settings.workingDays || [1, 2, 3, 4, 5]).includes(day);
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => updateSettings(prev => {
+                        const currentDays = prev.workingDays || [1, 2, 3, 4, 5];
+                        const newDays = isSelected 
+                          ? currentDays.filter(d => d !== day)
+                          : [...currentDays, day].sort();
+                        return { ...prev, workingDays: newDays };
+                      })}
+                      className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                        isSelected 
+                          ? 'bg-primary text-white' 
+                          : 'bg-surface-hover text-text-secondary hover:text-text'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
+            
             <div>
               <label className="block text-sm font-medium text-text mb-2">Timezone</label>
               <p className="text-text-secondary">{settings.timezone}</p>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Gmail Integration */}
+        <Card variant="bordered">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect width="20" height="16" x="2" y="4" rx="2"/>
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+              </svg>
+              Email Integration
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-text-secondary">
+              Connect your Gmail to automatically scan for actionable items and import them as tasks or projects.
+            </p>
+            
+            {isCheckingGmail ? (
+              <div className="flex items-center gap-2 text-text-muted">
+                <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+                <span>Checking connection...</span>
+              </div>
+            ) : gmailStatus.connected ? (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3 p-3 bg-success/10 rounded-lg">
+                  <div className="w-8 h-8 rounded-full bg-success/20 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-success">
+                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                      <polyline points="22 4 12 14.01 9 11.01"/>
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-medium text-success">Gmail Connected</p>
+                    <p className="text-sm text-text-muted">{gmailStatus.email}</p>
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={handleGmailDisconnect}
+                  >
+                    Disconnect
+                  </Button>
+                </div>
+                
+                {!isScanningEmails ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => handleScanEmails('week')}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12 6 12 12 16 14"/>
+                      </svg>
+                      Scan Last Week
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => handleScanEmails('3months')}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="16" y1="2" x2="16" y2="6"/>
+                        <line x1="8" y1="2" x2="8" y2="6"/>
+                        <line x1="3" y1="10" x2="21" y2="10"/>
+                      </svg>
+                      Scan Last 3 Months
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+                      <span className="text-sm">{scanProgress?.step || 'Processing...'}</span>
+                    </div>
+                    {scanProgress && (
+                      <div className="w-full bg-surface-hover rounded-full h-2">
+                        <div 
+                          className="bg-primary h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${(scanProgress.current / scanProgress.total) * 100}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <Button
+                onClick={handleGmailConnect}
+                isLoading={isConnectingGmail}
+                className="flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect width="20" height="16" x="2" y="4" rx="2"/>
+                  <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+                </svg>
+                Connect Gmail
+              </Button>
+            )}
+            
+            <p className="text-xs text-text-muted">
+              We only read email metadata (subject, sender, date) to identify actionable items. 
+              Email content is analyzed locally and never stored.
+            </p>
           </CardContent>
         </Card>
 
@@ -784,6 +1148,132 @@ export function SettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Email Review Modal */}
+      {showReviewModal && analysisResult && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-surface rounded-xl shadow-lg max-w-2xl w-full max-h-[80vh] flex flex-col">
+            <div className="p-6 border-b border-border">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-text">Review Discovered Items</h2>
+                  <p className="text-sm text-text-muted mt-1">
+                    Found {analysisResult.items.length} actionable items in {analysisResult.emailsProcessed} emails
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setShowReviewModal(false)}
+                  className="p-2 hover:bg-surface-hover rounded-lg transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+              <div className="flex items-center gap-4 mt-4">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedItems(new Set(analysisResult.items.map(i => i.id)))}
+                >
+                  Select All
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedItems(new Set())}
+                >
+                  Deselect All
+                </Button>
+                <span className="text-sm text-text-muted ml-auto">
+                  {selectedItems.size} selected
+                </span>
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {analysisResult.items.map(item => (
+                <div 
+                  key={item.id}
+                  className={`p-4 rounded-lg border-2 transition-colors cursor-pointer ${
+                    selectedItems.has(item.id)
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border bg-surface-hover/50 hover:border-text-muted'
+                  }`}
+                  onClick={() => {
+                    const newSelected = new Set(selectedItems);
+                    if (newSelected.has(item.id)) {
+                      newSelected.delete(item.id);
+                    } else {
+                      newSelected.add(item.id);
+                    }
+                    setSelectedItems(newSelected);
+                  }}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                      selectedItems.has(item.id) 
+                        ? 'border-primary bg-primary' 
+                        : 'border-text-muted'
+                    }`}>
+                      {selectedItems.has(item.id) && (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-text">{item.title}</span>
+                        <Badge variant={item.type === 'task' ? 'primary' : 'success'} className="text-xs">
+                          {item.type}
+                        </Badge>
+                        <Badge 
+                          variant={item.priority === 'high' ? 'danger' : item.priority === 'medium' ? 'warning' : 'secondary'}
+                          className="text-xs"
+                        >
+                          {item.priority}
+                        </Badge>
+                        {item.urgency === 'urgent' && (
+                          <Badge variant="danger" className="text-xs">⚡ Urgent</Badge>
+                        )}
+                      </div>
+                      {item.description && (
+                        <p className="text-sm text-text-secondary mt-1 line-clamp-2">
+                          {item.description}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-3 mt-2 text-xs text-text-muted">
+                        <span>From: {item.senderName}</span>
+                        {item.deadline && (
+                          <span>Due: {new Date(item.deadline).toLocaleDateString()}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <div className="p-4 border-t border-border flex items-center justify-between gap-4">
+              <Button
+                variant="ghost"
+                onClick={() => setShowReviewModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleImportSelectedItems}
+                isLoading={isImporting}
+                disabled={selectedItems.size === 0}
+              >
+                Import {selectedItems.size} Item{selectedItems.size !== 1 ? 's' : ''}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

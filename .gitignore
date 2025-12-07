@@ -15,3 +15,7 @@ ios/Pods/
 *.log
 .DS_Store
 coverage/
+
+# OAuth credentials
+docs/clientsecretGmailAssistant.json
+**/client_secret*.json

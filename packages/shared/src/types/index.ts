@@ -27,7 +27,7 @@ export interface UserSettings {
   theme: 'celestial' | 'sunset' | 'system';
   notifications: NotificationSettings;
   workingHours: { start: string; end: string };
-  weeklyCapacity: number;
+  workingDays: number[]; // 0 = Sunday, 1 = Monday, etc.
   timezone: string;
 }
 
@@ -156,6 +156,8 @@ export interface Habit {
   daysOfWeek?: number[];
   targetPerDay?: number;
   reminderTime?: string;
+  scheduledTime?: string; // HH:MM format - when to do this habit
+  estimatedMinutes?: number; // How long this habit takes
   currentStreak: number;
   longestStreak: number;
   totalCompletions: number;
