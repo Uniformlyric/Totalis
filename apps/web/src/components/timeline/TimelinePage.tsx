@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button } from '@/components/ui';
-import type { Task, Project, Goal } from '@totalis/shared';
+import type { Task, Project, Milestone } from '@totalis/shared';
 import type { User } from 'firebase/auth';
 
 type ViewMode = 'week' | 'month' | 'quarter';
@@ -28,7 +28,7 @@ interface TimelineItem {
   startDate: Date;
   endDate: Date;
   color: string;
-  type: 'project' | 'task' | 'goal';
+  type: 'project' | 'task' | 'milestone';
   status: string;
   projectId?: string;
   progress?: number;
@@ -75,7 +75,7 @@ function TimelineBar({
 }: { 
   item: TimelineItem; 
   dayColumns: DayColumn[];
-  onClick?: () => void;
+  onClick?: (e?: React.MouseEvent) => void;
 }) {
   const startIdx = dayColumns.findIndex(d => d.dateStr >= item.startDate.toISOString().split('T')[0]);
   const endIdx = dayColumns.findIndex(d => d.dateStr > item.endDate.toISOString().split('T')[0]);
@@ -101,7 +101,7 @@ function TimelineBar({
         backgroundColor: item.color,
         top: '4px',
       }}
-      onClick={onClick}
+      onClick={(e) => onClick?.(e)}
       title={`${item.title}\n${item.startDate.toLocaleDateString()} - ${item.endDate.toLocaleDateString()}`}
     >
       <span className="text-xs font-medium text-white truncate drop-shadow-sm">
@@ -179,11 +179,12 @@ export function TimelinePage() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState<TimelineItem | null>(null);
+  const [selectedProjectFilter, setSelectedProjectFilter] = useState<string | null>(null);
 
   // Data
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [goals, setGoals] = useState<Goal[]>([]);
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -238,7 +239,7 @@ export function TimelinePage() {
       try {
         const { subscribeToTasks } = await import('@/lib/db/tasks');
         const { subscribeToProjects } = await import('@/lib/db/projects');
-        const { subscribeToGoals } = await import('@/lib/db/goals');
+        const { subscribeToMilestones } = await import('@/lib/db/milestones');
 
         // Subscribe to tasks
         const unsubTasks = subscribeToTasks((updatedTasks) => {
@@ -253,11 +254,11 @@ export function TimelinePage() {
         });
         unsubscribes.push(unsubProjects);
 
-        // Subscribe to goals
-        const unsubGoals = subscribeToGoals(user.uid, (updatedGoals) => {
-          setGoals(updatedGoals);
+        // Subscribe to milestones (for all projects)
+        const unsubMilestones = subscribeToMilestones(user.uid, (updatedMilestones) => {
+          setMilestones(updatedMilestones);
         });
-        unsubscribes.push(unsubGoals);
+        unsubscribes.push(unsubMilestones);
       } catch (err) {
         console.error('Failed to load data:', err);
         setIsLoading(false);
@@ -282,32 +283,51 @@ export function TimelinePage() {
     }
   }, [isLoading, dayColumns]);
 
+  // Filter projects based on selection
+  const filteredProjects = useMemo(() => {
+    if (!selectedProjectFilter) return projects;
+    return projects.filter(p => p.id === selectedProjectFilter);
+  }, [projects, selectedProjectFilter]);
+
   // Convert data to timeline items
   const timelineItems = useMemo(() => {
     const items: TimelineItem[] = [];
-    const projectColors: Record<string, string> = {};
 
-    // Add projects as a color map
-    projects.forEach((project) => {
-      projectColors[project.id] = project.color || '#6366f1';
+    // Only add filtered projects as timeline items
+    filteredProjects.forEach((project) => {
+      const endD = project.deadline ? toSafeDate(project.deadline) : null;
+      const startD = toSafeDate(project.startDate) || toSafeDate(project.createdAt) || new Date();
       
-      // Add projects with deadlines as timeline items
-      if (project.deadline) {
-        const endD = toSafeDate(project.deadline);
-        if (!endD) return; // Skip if invalid date
-        
-        const startD = toSafeDate(project.createdAt) || new Date();
-        
-        // Calculate progress
-        const progress = project.taskCount > 0
-          ? Math.round((project.completedTaskCount / project.taskCount) * 100)
-          : 0;
+      // Calculate progress
+      const progress = project.taskCount > 0
+        ? Math.round((project.completedTaskCount / project.taskCount) * 100)
+        : 0;
 
+      // Find the latest due date among project tasks or milestones
+      const projectTasks = tasks.filter(t => t.projectId === project.id && t.dueDate);
+      const projectMilestones = milestones.filter(m => m.projectId === project.id && m.deadline);
+      
+      let latestDueDate = endD;
+      projectTasks.forEach(t => {
+        const d = toSafeDate(t.dueDate);
+        if (d && (!latestDueDate || d > latestDueDate)) {
+          latestDueDate = d;
+        }
+      });
+      projectMilestones.forEach(m => {
+        const d = toSafeDate(m.deadline);
+        if (d && (!latestDueDate || d > latestDueDate)) {
+          latestDueDate = d;
+        }
+      });
+
+      // Only show projects that have a deadline OR have tasks/milestones with due dates
+      if (latestDueDate) {
         items.push({
           id: project.id,
           title: project.title,
           startDate: startD,
-          endDate: endD,
+          endDate: latestDueDate,
           color: project.color || '#6366f1',
           type: 'project',
           status: project.status,
@@ -316,70 +336,126 @@ export function TimelinePage() {
       }
     });
 
-    // Add tasks with due dates
-    tasks
-      .filter(t => t.dueDate && t.status !== 'completed')
-      .forEach((task) => {
-        const dueDate = toSafeDate(task.dueDate);
-        if (!dueDate) return; // Skip if invalid date
-        
-        // Task spans from creation to due date, or just 1 day if no creation date
-        const startD = toSafeDate(task.createdAt) || new Date(dueDate);
-        startD.setHours(0, 0, 0, 0);
-        
-        // If task is short, show it as at least 1 day
-        const daysDiff = Math.max(1, Math.ceil((dueDate.getTime() - startD.getTime()) / (1000 * 60 * 60 * 24)));
-        
-        // For long-running tasks, show full span. For quick tasks, just show near due date
-        const effectiveStart = daysDiff > 7 ? startD : new Date(dueDate.getTime() - 3 * 24 * 60 * 60 * 1000);
+    // Sort projects by start date
+    return items.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+  }, [tasks, filteredProjects, milestones]);
 
-        items.push({
+  // Group tasks by project and milestone for nested display
+  interface MilestoneGroup {
+    milestone: Milestone;
+    tasks: TimelineItem[];
+  }
+
+  interface ProjectWithMilestones {
+    project: TimelineItem;
+    milestoneGroups: MilestoneGroup[];
+    unassignedTasks: TimelineItem[]; // Tasks not in any milestone
+    expanded: boolean;
+  }
+
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [expandedMilestones, setExpandedMilestones] = useState<Set<string>>(new Set());
+
+  const projectsWithMilestones = useMemo(() => {
+    const result: ProjectWithMilestones[] = [];
+
+    timelineItems.forEach(projectItem => {
+      // Get milestones for this project, sorted by order
+      const projectMilestones = milestones
+        .filter(m => m.projectId === projectItem.id)
+        .sort((a, b) => a.order - b.order);
+
+      // Get all tasks for this project that aren't completed
+      const projectTasks = tasks
+        .filter(t => t.projectId === projectItem.id && t.status !== 'completed');
+
+      // Helper to create a TimelineItem from a task
+      const taskToTimelineItem = (task: Task, index: number): TimelineItem => {
+        const dueDate = toSafeDate(task.dueDate);
+        // Use scheduled dates if available, otherwise show task as a short bar near due date
+        const scheduledStart = toSafeDate(task.scheduledStart);
+        const scheduledEnd = toSafeDate(task.scheduledEnd);
+        
+        let startD: Date;
+        let endD: Date;
+        
+        if (scheduledStart && scheduledEnd) {
+          // Use scheduled times
+          startD = scheduledStart;
+          endD = scheduledEnd;
+        } else if (dueDate) {
+          // Show task as 1-2 days ending on due date
+          endD = dueDate;
+          startD = new Date(dueDate.getTime() - 1 * 24 * 60 * 60 * 1000); // 1 day before
+        } else {
+          // No dates - skip or use today
+          endD = new Date();
+          startD = new Date();
+        }
+        
+        return {
           id: task.id,
           title: task.title,
-          startDate: effectiveStart,
-          endDate: dueDate,
-          color: task.projectId && projectColors[task.projectId] 
-            ? projectColors[task.projectId] 
-            : '#64748b',
-          type: 'task',
+          startDate: startD,
+          endDate: endD,
+          color: projectItem.color,
+          type: 'task' as const,
           status: task.status,
           projectId: task.projectId,
-        });
+        };
+      };
+
+      // Group tasks by milestone
+      const milestoneGroups: MilestoneGroup[] = projectMilestones.map(milestone => {
+        const milestoneTasks = projectTasks
+          .filter(t => t.milestoneId === milestone.id)
+          .map(taskToTimelineItem);
+
+        return {
+          milestone,
+          tasks: milestoneTasks,
+        };
       });
 
-    // Add goals with deadlines
-    goals
-      .filter(g => g.deadline && g.status !== 'completed')
-      .forEach((goal) => {
-        const deadline = toSafeDate(goal.deadline);
-        if (!deadline) return; // Skip if invalid date
-        
-        const startD = toSafeDate(goal.createdAt) || new Date();
-        
-        items.push({
-          id: goal.id,
-          title: goal.title,
-          startDate: startD,
-          endDate: deadline,
-          color: '#10b981', // Green for goals
-          type: 'goal',
-          status: goal.status,
-          progress: goal.progress,
-        });
+      // Get tasks not assigned to any milestone
+      const unassignedTasks = projectTasks
+        .filter(t => !t.milestoneId)
+        .map(taskToTimelineItem);
+
+      result.push({
+        project: projectItem,
+        milestoneGroups,
+        unassignedTasks,
+        expanded: expandedProjects.has(projectItem.id),
       });
+    });
 
-    // Sort by start date
-    return items.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
-  }, [tasks, projects, goals]);
+    return result;
+  }, [timelineItems, tasks, milestones, expandedProjects]);
 
-  // Group items by type for display
-  const groupedItems = useMemo(() => {
-    return {
-      projects: timelineItems.filter(i => i.type === 'project'),
-      goals: timelineItems.filter(i => i.type === 'goal'),
-      tasks: timelineItems.filter(i => i.type === 'task'),
-    };
-  }, [timelineItems]);
+  const toggleProjectExpanded = (projectId: string) => {
+    setExpandedProjects(prev => {
+      const next = new Set(prev);
+      if (next.has(projectId)) {
+        next.delete(projectId);
+      } else {
+        next.add(projectId);
+      }
+      return next;
+    });
+  };
+
+  const toggleMilestoneExpanded = (milestoneId: string) => {
+    setExpandedMilestones(prev => {
+      const next = new Set(prev);
+      if (next.has(milestoneId)) {
+        next.delete(milestoneId);
+      } else {
+        next.add(milestoneId);
+      }
+      return next;
+    });
+  };
 
   // Navigate timeline
   const navigateTimeline = (direction: 'prev' | 'next' | 'today') => {
@@ -429,6 +505,18 @@ export function TimelinePage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {/* Project Filter */}
+          <select
+            value={selectedProjectFilter || ''}
+            onChange={(e) => setSelectedProjectFilter(e.target.value || null)}
+            className="px-3 py-1.5 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">All Projects</option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id}>{p.title}</option>
+            ))}
+          </select>
+          
           {/* Navigation */}
           <div className="flex gap-1">
             <Button variant="secondary" size="sm" onClick={() => navigateTimeline('prev')}>
@@ -458,19 +546,20 @@ export function TimelinePage() {
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap gap-4 text-sm">
+      <div className="flex flex-wrap items-center gap-6 text-sm">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-sm bg-primary" />
-          <span className="text-text-muted">Projects</span>
+          <div className="w-4 h-4 rounded bg-primary" />
+          <span className="text-text-muted">Project</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-sm bg-success" />
-          <span className="text-text-muted">Goals</span>
+          <div className="w-3 h-3 rotate-45 bg-warning" />
+          <span className="text-text-muted">Milestone</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-sm bg-gray-500" />
-          <span className="text-text-muted">Tasks</span>
+          <div className="w-4 h-2 rounded bg-primary/60" />
+          <span className="text-text-muted">Task</span>
         </div>
+        <span className="text-text-muted text-xs ml-auto">Click to expand • Tasks shown in project order</span>
       </div>
 
       {isLoading ? (
@@ -489,7 +578,7 @@ export function TimelinePage() {
             <div className="min-w-[800px]">
               {/* Timeline Header */}
               <div className="flex border-b border-border sticky top-0 bg-surface z-10">
-                <div className="w-32 flex-shrink-0 p-2 text-xs font-medium text-text-muted border-r border-border">
+                <div className="w-48 flex-shrink-0 p-2 text-xs font-medium text-text-muted border-r border-border">
                   Item
                 </div>
                 <div className="flex-1 flex">
@@ -511,133 +600,205 @@ export function TimelinePage() {
                 </div>
               </div>
 
-              {/* Projects Section */}
-              {groupedItems.projects.length > 0 && (
-                <>
-                  <div className="flex bg-surface-hover/50 border-b border-border">
-                    <div className="w-32 flex-shrink-0 p-2 text-xs font-semibold text-text flex items-center gap-2 border-r border-border">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M3 3h18v18H3zM3 9h18M9 21V9"/>
-                      </svg>
-                      Projects
-                    </div>
-                    <div className="flex-1" />
-                  </div>
-                  {groupedItems.projects.map((item) => (
-                    <div key={item.id} className="flex border-b border-border hover:bg-surface-hover/30">
-                      <div className="w-32 flex-shrink-0 p-2 text-xs truncate border-r border-border text-text">
-                        {item.title}
-                      </div>
-                      <div className="flex-1 relative h-9">
-                        {/* Grid lines */}
-                        <div className="absolute inset-0 flex">
-                          {dayColumns.map((day) => (
-                            <div
-                              key={day.dateStr}
-                              className={`flex-1 border-r border-border/30 last:border-r-0 ${
-                                day.isToday ? 'bg-primary/5' : day.isWeekend ? 'bg-surface-hover/50' : ''
-                              }`}
-                            />
-                          ))}
+              {/* Projects with Nested Milestones and Tasks */}
+              {projectsWithMilestones.length > 0 ? (
+                projectsWithMilestones.map(({ project, milestoneGroups, unassignedTasks, expanded }) => {
+                  const totalItems = milestoneGroups.reduce((sum, mg) => sum + mg.tasks.length, 0) + unassignedTasks.length + milestoneGroups.length;
+                  
+                  return (
+                    <div key={project.id}>
+                      {/* Project Row */}
+                      <div 
+                        className="flex border-b border-border hover:bg-surface-hover/30 cursor-pointer"
+                        onClick={() => toggleProjectExpanded(project.id)}
+                      >
+                        <div className="w-48 flex-shrink-0 p-2 text-sm font-medium border-r border-border text-text flex items-center gap-2">
+                          <span className="text-text-muted text-xs">
+                            {expanded ? '▼' : '▶'}
+                          </span>
+                          <span className="truncate flex-1">{project.title}</span>
+                          {totalItems > 0 && (
+                            <Badge variant="secondary" className="text-xs">
+                              {totalItems}
+                            </Badge>
+                          )}
                         </div>
-                        <TimelineBar 
-                          item={item} 
-                          dayColumns={dayColumns}
-                          onClick={() => setSelectedItem(item)}
-                        />
+                        <div className="flex-1 relative h-10">
+                          <div className="absolute inset-0 flex">
+                            {dayColumns.map((day) => (
+                              <div
+                                key={day.dateStr}
+                                className={`flex-1 border-r border-border/30 last:border-r-0 ${
+                                  day.isToday ? 'bg-primary/5' : day.isWeekend ? 'bg-surface-hover/50' : ''
+                                }`}
+                              />
+                            ))}
+                          </div>
+                          <TimelineBar 
+                            item={project} 
+                            dayColumns={dayColumns}
+                            onClick={(e) => {
+                              e?.stopPropagation();
+                              setSelectedItem(project);
+                            }}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </>
-              )}
 
-              {/* Goals Section */}
-              {groupedItems.goals.length > 0 && (
-                <>
-                  <div className="flex bg-surface-hover/50 border-b border-border">
-                    <div className="w-32 flex-shrink-0 p-2 text-xs font-semibold text-text flex items-center gap-2 border-r border-border">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10" />
-                        <circle cx="12" cy="12" r="6" />
-                        <circle cx="12" cy="12" r="2" />
-                      </svg>
-                      Goals
-                    </div>
-                    <div className="flex-1" />
-                  </div>
-                  {groupedItems.goals.map((item) => (
-                    <div key={item.id} className="flex border-b border-border hover:bg-surface-hover/30">
-                      <div className="w-32 flex-shrink-0 p-2 text-xs truncate border-r border-border text-text">
-                        {item.title}
-                      </div>
-                      <div className="flex-1 relative h-9">
-                        <div className="absolute inset-0 flex">
-                          {dayColumns.map((day) => (
-                            <div
-                              key={day.dateStr}
-                              className={`flex-1 border-r border-border/30 last:border-r-0 ${
-                                day.isToday ? 'bg-primary/5' : day.isWeekend ? 'bg-surface-hover/50' : ''
-                              }`}
-                            />
-                          ))}
-                        </div>
-                        <TimelineBar 
-                          item={item} 
-                          dayColumns={dayColumns}
-                          onClick={() => setSelectedItem(item)}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </>
-              )}
+                      {/* Expanded Content */}
+                      {expanded && (
+                        <>
+                          {/* Milestones with their tasks */}
+                          {milestoneGroups.map(({ milestone, tasks: milestoneTasks }) => {
+                            const milestoneDeadline = toSafeDate(milestone.deadline);
+                            const milestoneExpanded = expandedMilestones.has(milestone.id);
+                            
+                            return (
+                              <div key={milestone.id}>
+                                {/* Milestone Row */}
+                                <div 
+                                  className="flex border-b border-border/50 bg-warning/5 cursor-pointer hover:bg-warning/10"
+                                  onClick={() => toggleMilestoneExpanded(milestone.id)}
+                                >
+                                  <div className="w-48 flex-shrink-0 p-2 text-xs border-r border-border text-warning pl-6 flex items-center gap-2">
+                                    <span className="text-warning/60 text-[10px]">
+                                      {milestoneExpanded ? '▼' : '▶'}
+                                    </span>
+                                    <span className="w-2 h-2 rotate-45 bg-warning flex-shrink-0" />
+                                    <span className="truncate flex-1 font-medium">{milestone.title}</span>
+                                    {milestoneTasks.length > 0 && (
+                                      <Badge variant="warning" className="text-[10px]">
+                                        {milestoneTasks.length}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="flex-1 relative h-8">
+                                    <div className="absolute inset-0 flex">
+                                      {dayColumns.map((day) => (
+                                        <div
+                                          key={day.dateStr}
+                                          className={`flex-1 border-r border-border/20 last:border-r-0 ${
+                                            day.isToday ? 'bg-primary/5' : ''
+                                          }`}
+                                        />
+                                      ))}
+                                    </div>
+                                    {milestoneDeadline && (
+                                      <MilestoneMarker
+                                        date={milestoneDeadline}
+                                        title={milestone.title}
+                                        dayColumns={dayColumns}
+                                      />
+                                    )}
+                                  </div>
+                                </div>
 
-              {/* Tasks Section */}
-              {groupedItems.tasks.length > 0 && (
-                <>
-                  <div className="flex bg-surface-hover/50 border-b border-border">
-                    <div className="w-32 flex-shrink-0 p-2 text-xs font-semibold text-text flex items-center gap-2 border-r border-border">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M9 11l3 3L22 4" />
-                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                      </svg>
-                      Tasks ({groupedItems.tasks.length})
+                                {/* Tasks under this milestone */}
+                                {milestoneExpanded && milestoneTasks.map((task) => (
+                                  <div key={task.id} className="flex border-b border-border/30 bg-surface-hover/10">
+                                    <div className="w-48 flex-shrink-0 p-1.5 text-[11px] border-r border-border text-text-secondary pl-10 truncate">
+                                      {task.title}
+                                    </div>
+                                    <div className="flex-1 relative h-6">
+                                      <div className="absolute inset-0 flex">
+                                        {dayColumns.map((day) => (
+                                          <div
+                                            key={day.dateStr}
+                                            className={`flex-1 border-r border-border/10 last:border-r-0 ${
+                                              day.isToday ? 'bg-primary/5' : ''
+                                            }`}
+                                          />
+                                        ))}
+                                      </div>
+                                      {(() => {
+                                        const startIdx = Math.max(0, dayColumns.findIndex(d => d.dateStr >= task.startDate.toISOString().split('T')[0]));
+                                        let endIdx = dayColumns.findIndex(d => d.dateStr > task.endDate.toISOString().split('T')[0]);
+                                        if (endIdx === -1) endIdx = dayColumns.length;
+                                        const span = Math.max(1, endIdx - startIdx);
+                                        
+                                        return (
+                                          <div
+                                            className="absolute h-3 rounded flex items-center px-1 cursor-pointer transition-all hover:brightness-110 overflow-hidden"
+                                            style={{
+                                              left: `${(startIdx / dayColumns.length) * 100}%`,
+                                              width: `${(span / dayColumns.length) * 100}%`,
+                                              backgroundColor: `${task.color}60`,
+                                              top: '6px',
+                                            }}
+                                            onClick={() => setSelectedItem(task)}
+                                            title={`${task.title}\n${task.startDate.toLocaleDateString()} - ${task.endDate.toLocaleDateString()}`}
+                                          />
+                                        );
+                                      })()}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+
+                          {/* Unassigned Tasks (not in any milestone) */}
+                          {unassignedTasks.length > 0 && (
+                            <>
+                              {milestoneGroups.length > 0 && (
+                                <div className="flex border-b border-border/50 bg-surface-hover/30">
+                                  <div className="w-48 flex-shrink-0 p-1.5 text-[10px] border-r border-border text-text-muted pl-6 uppercase tracking-wide">
+                                    Other Tasks
+                                  </div>
+                                  <div className="flex-1" />
+                                </div>
+                              )}
+                              {unassignedTasks.map((task) => (
+                                <div key={task.id} className="flex border-b border-border/30 bg-surface-hover/10">
+                                  <div className="w-48 flex-shrink-0 p-1.5 text-[11px] border-r border-border text-text-secondary pl-8 truncate">
+                                    {task.title}
+                                  </div>
+                                  <div className="flex-1 relative h-6">
+                                    <div className="absolute inset-0 flex">
+                                      {dayColumns.map((day) => (
+                                        <div
+                                          key={day.dateStr}
+                                          className={`flex-1 border-r border-border/10 last:border-r-0 ${
+                                            day.isToday ? 'bg-primary/5' : ''
+                                          }`}
+                                        />
+                                      ))}
+                                    </div>
+                                    {(() => {
+                                      const startIdx = Math.max(0, dayColumns.findIndex(d => d.dateStr >= task.startDate.toISOString().split('T')[0]));
+                                      let endIdx = dayColumns.findIndex(d => d.dateStr > task.endDate.toISOString().split('T')[0]);
+                                      if (endIdx === -1) endIdx = dayColumns.length;
+                                      const span = Math.max(1, endIdx - startIdx);
+                                      
+                                      return (
+                                        <div
+                                          className="absolute h-3 rounded flex items-center px-1 cursor-pointer transition-all hover:brightness-110 overflow-hidden"
+                                          style={{
+                                            left: `${(startIdx / dayColumns.length) * 100}%`,
+                                            width: `${(span / dayColumns.length) * 100}%`,
+                                            backgroundColor: `${task.color}60`,
+                                            top: '6px',
+                                          }}
+                                          onClick={() => setSelectedItem(task)}
+                                          title={`${task.title}\n${task.startDate.toLocaleDateString()} - ${task.endDate.toLocaleDateString()}`}
+                                        />
+                                      );
+                                    })()}
+                                  </div>
+                                </div>
+                              ))}
+                            </>
+                          )}
+                        </>
+                      )}
                     </div>
-                    <div className="flex-1" />
-                  </div>
-                  {groupedItems.tasks.slice(0, 15).map((item) => (
-                    <div key={item.id} className="flex border-b border-border hover:bg-surface-hover/30">
-                      <div className="w-32 flex-shrink-0 p-2 text-xs truncate border-r border-border text-text">
-                        {item.title}
-                      </div>
-                      <div className="flex-1 relative h-9">
-                        <div className="absolute inset-0 flex">
-                          {dayColumns.map((day) => (
-                            <div
-                              key={day.dateStr}
-                              className={`flex-1 border-r border-border/30 last:border-r-0 ${
-                                day.isToday ? 'bg-primary/5' : day.isWeekend ? 'bg-surface-hover/50' : ''
-                              }`}
-                            />
-                          ))}
-                        </div>
-                        <TimelineBar 
-                          item={item} 
-                          dayColumns={dayColumns}
-                          onClick={() => setSelectedItem(item)}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  {groupedItems.tasks.length > 15 && (
-                    <div className="flex border-b border-border">
-                      <div className="w-32 flex-shrink-0 p-2 text-xs text-text-muted italic border-r border-border">
-                        +{groupedItems.tasks.length - 15} more
-                      </div>
-                      <div className="flex-1" />
-                    </div>
-                  )}
-                </>
+                  );
+                })
+              ) : (
+                <div className="p-8 text-center text-text-muted">
+                  <p>No projects with deadlines or scheduled tasks.</p>
+                  <p className="text-sm mt-1">Create a project with a deadline or add due dates to tasks.</p>
+                </div>
               )}
             </div>
           </div>
@@ -650,7 +811,7 @@ export function TimelinePage() {
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <Badge variant={selectedItem.type === 'project' ? 'primary' : selectedItem.type === 'goal' ? 'success' : 'secondary'}>
+                <Badge variant={selectedItem.type === 'project' ? 'primary' : selectedItem.type === 'milestone' ? 'warning' : 'secondary'}>
                   {selectedItem.type}
                 </Badge>
                 <h3 className="font-semibold text-text">{selectedItem.title}</h3>

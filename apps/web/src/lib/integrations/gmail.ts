@@ -133,11 +133,16 @@ export async function getGmailStatus(userId: string): Promise<GmailConnectionSta
   }
   
   const data = gmailDoc.data();
+  const expiresAt = data.expiresAt?.toDate?.() || new Date(data.expiresAt);
+  
+  // Check if token is expired (with 5 minute buffer)
+  const isExpired = expiresAt && new Date() > new Date(expiresAt.getTime() - 5 * 60 * 1000);
+  
   return {
-    connected: data.connected,
+    connected: data.connected && !isExpired,
     email: data.email,
-    accessToken: data.accessToken,
-    expiresAt: data.expiresAt?.toDate?.() || new Date(data.expiresAt),
+    accessToken: isExpired ? undefined : data.accessToken,
+    expiresAt,
     lastSyncAt: data.lastSyncAt?.toDate?.() || null,
   };
 }
@@ -406,22 +411,31 @@ export class GmailService {
     const status = await this.getConnectionStatus();
     
     if (!status.connected || !status.accessToken) {
-      throw new Error('Gmail not connected');
+      throw new Error('Gmail session expired. Please reconnect your Gmail account.');
     }
 
     // Get already processed email IDs
     const processedIds = await getProcessedEmailIds(this.userId);
     
     // Fetch emails
-    const emails = await fetchEmails(status.accessToken, {
-      afterDate: startDate,
-      maxResults: 200,
-    });
+    try {
+      const emails = await fetchEmails(status.accessToken, {
+        afterDate: startDate,
+        maxResults: 200,
+      });
 
-    // Filter out already processed emails
-    const newEmails = emails.filter(email => !processedIds.has(email.id));
-    
-    return newEmails;
+      // Filter out already processed emails
+      const newEmails = emails.filter(email => !processedIds.has(email.id));
+      
+      return newEmails;
+    } catch (error) {
+      // If we get a 401, the token is invalid - disconnect so user can reconnect
+      if (error instanceof Error && error.message.includes('authentication')) {
+        await disconnectGmail(this.userId);
+        throw new Error('Gmail session expired. Please reconnect your Gmail account.');
+      }
+      throw error;
+    }
   }
 
   async markEmailsAsProcessed(emailIds: string[]): Promise<void> {

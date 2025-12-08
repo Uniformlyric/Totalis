@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { QuickCaptureModal } from './QuickCaptureModal';
-import type { ParsedItem, ParsedTask, ParsedHabit, ParsedProject, ParsedGoal } from '@/lib/ai/gemini';
+import type { ParsedItem, ParsedTask, ParsedHabit, ParsedProject, ParsedGoal, UpdateItem } from '@/lib/ai/gemini';
 import type { Project, Goal, Task, Habit } from '@totalis/shared';
 import type { User } from 'firebase/auth';
 
@@ -220,6 +220,105 @@ export function QuickCaptureProvider({ children }: QuickCaptureProviderProps) {
     }
   }, [user, projects, goals]);
 
+  // Handle updating existing items in Firestore
+  const handleItemsUpdated = useCallback(async (updates: UpdateItem[]) => {
+    if (!user || updates.length === 0) return;
+
+    setIsCreating(true);
+
+    try {
+      const { updateTask } = await import('@/lib/db/tasks');
+      const { updateHabit } = await import('@/lib/db/habits');
+      const { updateProject } = await import('@/lib/db/projects');
+      const { updateGoal } = await import('@/lib/db/goals');
+
+      for (const update of updates) {
+        try {
+          switch (update.type) {
+            case 'update_task': {
+              const changes: Record<string, unknown> = {};
+              if (update.title !== undefined) changes.title = update.title;
+              if (update.description !== undefined) changes.description = update.description;
+              if (update.priority !== undefined) changes.priority = update.priority;
+              if (update.dueDate !== undefined) changes.dueDate = update.dueDate ? new Date(update.dueDate) : null;
+              if (update.status !== undefined) changes.status = update.status;
+              if (update.estimatedMinutes !== undefined) changes.estimatedMinutes = update.estimatedMinutes;
+              if (update.tags !== undefined) changes.tags = update.tags;
+              
+              if (Object.keys(changes).length > 0) {
+                await updateTask(update.id, changes);
+                console.log(`✅ Updated task ${update.id}`);
+              }
+              break;
+            }
+
+            case 'update_habit': {
+              const changes: Record<string, unknown> = {};
+              if (update.title !== undefined) changes.title = update.title;
+              if (update.description !== undefined) changes.description = update.description;
+              if (update.frequency !== undefined) changes.frequency = update.frequency;
+              if (update.daysOfWeek !== undefined) changes.daysOfWeek = update.daysOfWeek;
+              if (update.targetPerDay !== undefined) changes.targetPerDay = update.targetPerDay;
+              if (update.reminderTime !== undefined) changes.reminderTime = update.reminderTime;
+              if (update.color !== undefined) changes.color = update.color;
+              if (update.tags !== undefined) changes.tags = update.tags;
+              
+              if (Object.keys(changes).length > 0) {
+                await updateHabit(update.id, changes);
+                console.log(`✅ Updated habit ${update.id}`);
+              }
+              break;
+            }
+
+            case 'update_project': {
+              const changes: Record<string, unknown> = {};
+              if (update.title !== undefined) changes.title = update.title;
+              if (update.description !== undefined) changes.description = update.description;
+              if (update.deadline !== undefined) changes.deadline = update.deadline ? new Date(update.deadline) : null;
+              if (update.estimatedHours !== undefined) changes.estimatedHours = update.estimatedHours;
+              if (update.status !== undefined) changes.status = update.status;
+              if (update.color !== undefined) changes.color = update.color;
+              if (update.tags !== undefined) changes.tags = update.tags;
+              
+              if (Object.keys(changes).length > 0) {
+                await updateProject(update.id, changes);
+                console.log(`✅ Updated project ${update.id}`);
+              }
+              break;
+            }
+
+            case 'update_goal': {
+              const changes: Record<string, unknown> = {};
+              if (update.title !== undefined) changes.title = update.title;
+              if (update.description !== undefined) changes.description = update.description;
+              if (update.deadline !== undefined) changes.deadline = update.deadline ? new Date(update.deadline) : null;
+              if (update.timeframe !== undefined) changes.timeframe = update.timeframe;
+              if (update.targetValue !== undefined) changes.targetValue = update.targetValue;
+              if (update.unit !== undefined) changes.unit = update.unit;
+              if (update.status !== undefined) changes.status = update.status;
+              if (update.color !== undefined) changes.color = update.color;
+              if (update.tags !== undefined) changes.tags = update.tags;
+              
+              if (Object.keys(changes).length > 0) {
+                await updateGoal(update.id, changes);
+                console.log(`✅ Updated goal ${update.id}`);
+              }
+              break;
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to update ${update.type}:`, err);
+        }
+      }
+
+      console.log(`✅ Updated ${updates.length} item(s)`);
+    } catch (err) {
+      console.error('Failed to update items:', err);
+    } finally {
+      setIsCreating(false);
+    }
+  }, [user]);
+
   return (
     <>
       {children}
@@ -247,6 +346,7 @@ export function QuickCaptureProvider({ children }: QuickCaptureProviderProps) {
           isOpen={isOpen}
           onClose={() => setIsOpen(false)}
           onItemsCreated={handleItemsCreated}
+          onItemsUpdated={handleItemsUpdated}
           existingTasks={tasks}
           existingHabits={habits}
           existingProjects={projects}

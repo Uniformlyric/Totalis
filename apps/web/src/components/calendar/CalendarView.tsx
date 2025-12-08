@@ -9,6 +9,7 @@ interface CalendarViewProps {
   workingHours?: { start: string; end: string };
   onDayClick?: (date: Date) => void;
   onTaskClick?: (task: Task) => void;
+  onScheduleTask?: (task: Task, preferredDate?: Date) => void;
 }
 
 interface DayData {
@@ -72,6 +73,7 @@ export function CalendarView({
   workingHours = { start: '09:00', end: '17:00' },
   onDayClick,
   onTaskClick,
+  onScheduleTask,
 }: CalendarViewProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -478,54 +480,83 @@ export function CalendarView({
                 const schedStart = toSafeDate(task.scheduledStart);
                 const isScheduledOnDifferentDay = schedStart && 
                   toLocalDateString(schedStart) !== selectedDayData.dateString;
+                const isUnscheduled = !schedStart && task.status !== 'completed';
                 return (
-                  <button
+                  <div
                     key={`due-${task.id}`}
-                    onClick={() => onTaskClick?.(task)}
                     className={`
-                      w-full text-left p-3 rounded-lg border transition-colors
+                      w-full p-3 rounded-lg border transition-colors
                       ${task.status === 'completed'
                         ? 'bg-success/5 border-success/30'
-                        : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 hover:border-primary/30'
+                        : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
                       }
                     `}
                   >
-                    <div className="flex items-center justify-between">
-                      <span
-                        className={`font-medium ${
-                          task.status === 'completed' ? 'line-through text-text-muted' : 'text-text'
-                        }`}
-                      >
-                        {task.title}
-                      </span>
-                      <Badge
-                        variant={
-                          task.priority === 'urgent'
-                            ? 'danger'
-                            : task.priority === 'high'
-                              ? 'warning'
-                              : 'secondary'
-                        }
-                        size="sm"
-                      >
-                        {task.priority}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-text-secondary">
-                      {schedStart ? (
-                        <span className={isScheduledOnDifferentDay ? 'text-blue-600 dark:text-blue-400' : ''}>
-                          ⏰ Scheduled: {schedStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                          {' at '}
-                          {schedStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                    <button
+                      onClick={() => onTaskClick?.(task)}
+                      className="w-full text-left"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={`font-medium ${
+                            task.status === 'completed' ? 'line-through text-text-muted' : 'text-text'
+                          }`}
+                        >
+                          {task.title}
                         </span>
-                      ) : (
-                        <span className="text-red-500 font-medium">⚠️ Not yet scheduled</span>
-                      )}
-                      {task.estimatedMinutes && (
-                        <span>~{task.estimatedMinutes}min</span>
-                      )}
-                    </div>
-                  </button>
+                        <Badge
+                          variant={
+                            task.priority === 'urgent'
+                              ? 'danger'
+                              : task.priority === 'high'
+                                ? 'warning'
+                                : 'secondary'
+                          }
+                          size="sm"
+                        >
+                          {task.priority}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-text-secondary">
+                        {schedStart ? (
+                          <span className={isScheduledOnDifferentDay ? 'text-blue-600 dark:text-blue-400' : ''}>
+                            ⏰ Scheduled: {schedStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            {' at '}
+                            {schedStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                          </span>
+                        ) : (
+                          <span className="text-red-500 font-medium">⚠️ Not yet scheduled</span>
+                        )}
+                        {task.estimatedMinutes && (
+                          <span>~{task.estimatedMinutes}min</span>
+                        )}
+                      </div>
+                    </button>
+                    
+                    {/* Quick Schedule Button for unscheduled tasks */}
+                    {isUnscheduled && onScheduleTask && (
+                      <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-800/50 flex gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onScheduleTask(task, selectedDayData.date);
+                          }}
+                          className="flex-1 text-xs px-2 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded font-medium transition-colors"
+                        >
+                          📅 Schedule for Today
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onScheduleTask(task);
+                          }}
+                          className="flex-1 text-xs px-2 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded font-medium transition-colors"
+                        >
+                          🧠 Auto-Schedule
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>

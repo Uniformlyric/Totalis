@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Modal, Button, Input, Textarea, Badge } from '@/components/ui';
 import type { Goal } from '@totalis/shared';
 
@@ -48,6 +48,23 @@ export function GoalModal({
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        formRef.current?.requestSubmit();
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
 
   // Reset form when goal changes
   useEffect(() => {
@@ -130,7 +147,7 @@ export function GoalModal({
       title={mode === 'create' ? 'Create Goal' : 'Edit Goal'}
       size="lg"
     >
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <form ref={formRef} onSubmit={handleSubmit} className="space-y-5">
         {/* Icon and Title */}
         <div className="flex gap-3">
           <div>
@@ -203,19 +220,41 @@ export function GoalModal({
           </div>
         </div>
 
-        {/* Deadline */}
-        <div>
-          <label className="block text-sm font-medium text-text mb-2">Target Date</label>
-          <input
-            type="date"
-            value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
-            className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
-          />
-        </div>
+        {/* Advanced options toggle (create mode only) */}
+        {mode === 'create' && !showAdvanced && (
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(true)}
+            className="flex items-center gap-2 text-sm text-text-muted hover:text-text transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="4" y1="21" x2="4" y2="14" />
+              <line x1="4" y1="10" x2="4" y2="3" />
+              <line x1="12" y1="21" x2="12" y2="12" />
+              <line x1="12" y1="8" x2="12" y2="3" />
+              <line x1="20" y1="21" x2="20" y2="16" />
+              <line x1="20" y1="12" x2="20" y2="3" />
+            </svg>
+            More options (deadline, measurable target...)
+          </button>
+        )}
 
-        {/* Measurable Target */}
-        <div className="p-4 bg-surface-hover/50 rounded-lg">
+        {/* Advanced fields - always shown in edit mode */}
+        {(showAdvanced || mode === 'edit') && (
+          <>
+            {/* Deadline */}
+            <div>
+              <label className="block text-sm font-medium text-text mb-2">Target Date</label>
+              <input
+                type="date"
+                value={deadline}
+                onChange={(e) => setDeadline(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+
+            {/* Measurable Target */}
+            <div className="p-4 bg-surface-hover/50 rounded-lg">
           <label className="block text-sm font-medium text-text mb-3">
             Measurable Target (Optional)
           </label>
@@ -271,7 +310,9 @@ export function GoalModal({
               </div>
             </div>
           )}
-        </div>
+            </div>
+          </>
+        )}
 
         {/* Delete Confirmation */}
         {showDeleteConfirm && onDelete && goal?.id && (
@@ -325,6 +366,7 @@ export function GoalModal({
             </Button>
             <Button type="submit" isLoading={isSaving}>
               {mode === 'create' ? 'Create Goal' : 'Save Changes'}
+              <span className="ml-2 text-xs opacity-60">⌘↵</span>
             </Button>
           </div>
         </div>

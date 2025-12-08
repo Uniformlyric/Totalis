@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Modal, Button, Input, Textarea } from '@/components/ui';
 import type { Habit } from '@totalis/shared';
 
@@ -11,10 +11,10 @@ interface HabitModalProps {
   mode?: 'create' | 'edit';
 }
 
-const frequencyOptions: { value: Habit['frequency']; label: string }[] = [
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' },
-  { value: 'custom', label: 'Custom Days' },
+const frequencyOptions: { value: Habit['frequency']; label: string; description: string }[] = [
+  { value: 'daily', label: 'Daily', description: 'Every day' },
+  { value: 'weekly', label: 'Weekly', description: 'Once a week' },
+  { value: 'custom', label: 'Custom', description: 'Pick days' },
 ];
 
 const colorOptions = [
@@ -28,9 +28,16 @@ const colorOptions = [
   '#ef4444', // Red
 ];
 
-const iconOptions = ['🏃', '💪', '📚', '🧘', '💧', '🍎', '😴', '✍️', '🎸', '💊', '🧹', '📱'];
+const iconOptions = ['🏃', '💪', '📚', '🧘', '💧', '🍎', '😴', '✍️', '🎸', '💊', '🧹', '📱', '🎯', '💰', '🧠', '❤️'];
 
 const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const durationPresets = [
+  { label: '5m', value: 5 },
+  { label: '15m', value: 15 },
+  { label: '30m', value: 30 },
+  { label: '1h', value: 60 },
+];
 
 export function HabitModal({
   habit,
@@ -53,6 +60,45 @@ export function HabitModal({
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [createAnother, setCreateAnother] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Cmd/Ctrl + Enter to save
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (title.trim()) {
+          document.getElementById('habit-form')?.dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true })
+          );
+        }
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, title]);
+
+  // Reset form for create another
+  const resetForm = () => {
+    setTitle('');
+    setDescription('');
+    setFrequency('daily');
+    setDaysOfWeek([0, 1, 2, 3, 4, 5, 6]);
+    setReminderTime('');
+    setScheduledTime('');
+    setEstimatedMinutes(30);
+    setColor(colorOptions[0]);
+    setIcon(iconOptions[0]);
+    setTargetPerDay(undefined);
+    setShowDeleteConfirm(false);
+    setTimeout(() => titleInputRef.current?.focus(), 100);
+  };
 
   // Reset form when habit changes
   useEffect(() => {
@@ -68,19 +114,11 @@ export function HabitModal({
       setIcon(habit.icon || iconOptions[0]);
       setTargetPerDay(habit.targetPerDay);
     } else {
-      // Reset for new habit
-      setTitle('');
-      setDescription('');
-      setFrequency('daily');
-      setDaysOfWeek([0, 1, 2, 3, 4, 5, 6]);
-      setReminderTime('');
-      setScheduledTime('');
-      setEstimatedMinutes(30);
-      setColor(colorOptions[0]);
-      setIcon(iconOptions[0]);
-      setTargetPerDay(undefined);
+      resetForm();
     }
     setShowDeleteConfirm(false);
+    setShowAdvanced(false);
+    setCreateAnother(false);
   }, [habit, isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -103,7 +141,13 @@ export function HabitModal({
         targetPerDay: targetPerDay || undefined,
         tags: [],
       });
-      onClose();
+      
+      // Handle create another
+      if (mode === 'create' && createAnother) {
+        resetForm();
+      } else {
+        onClose();
+      }
     } catch (error) {
       console.error('Failed to save habit:', error);
     } finally {
@@ -137,27 +181,33 @@ export function HabitModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={mode === 'create' ? 'Create Habit' : 'Edit Habit'}
+      title={mode === 'create' ? 'Quick Add Habit' : 'Edit Habit'}
       size="lg"
     >
-      <form onSubmit={handleSubmit} className="space-y-5">
-        {/* Icon and Title */}
+      <form id="habit-form" onSubmit={handleSubmit} className="space-y-5">
+        {/* Keyboard hints */}
+        {mode === 'create' && (
+          <div className="flex items-center gap-4 text-xs text-text-muted bg-surface-hover/50 rounded-lg px-3 py-2">
+            <span>⌨️ Shortcuts:</span>
+            <span><kbd className="px-1.5 py-0.5 bg-surface rounded text-xs">⌘+Enter</kbd> Save</span>
+            <span><kbd className="px-1.5 py-0.5 bg-surface rounded text-xs">Esc</kbd> Close</span>
+          </div>
+        )}
+
+        {/* Icon and Title - Streamlined */}
         <div className="flex gap-3">
+          {/* Quick icon picker */}
           <div>
             <label className="block text-sm font-medium text-text mb-2">Icon</label>
-            <div className="grid grid-cols-6 gap-1 p-2 bg-surface-hover rounded-lg">
-              {iconOptions.map((i) => (
+            <div className="grid grid-cols-4 gap-1 p-1 bg-surface-hover rounded-lg">
+              {iconOptions.slice(0, 8).map((i) => (
                 <button
                   key={i}
                   type="button"
                   onClick={() => setIcon(i)}
                   className={`
-                    w-8 h-8 text-xl rounded-md flex items-center justify-center
-                    transition-all
-                    ${icon === i
-                      ? 'bg-primary/20 ring-2 ring-primary'
-                      : 'hover:bg-surface'
-                    }
+                    w-8 h-8 text-lg rounded-md flex items-center justify-center transition-all
+                    ${icon === i ? 'bg-primary/20 ring-2 ring-primary' : 'hover:bg-surface'}
                   `}
                 >
                   {i}
@@ -167,8 +217,9 @@ export function HabitModal({
           </div>
           <div className="flex-1">
             <Input
-              label="Habit Name"
-              placeholder="e.g., Exercise, Read, Meditate"
+              ref={titleInputRef}
+              label="What habit do you want to build?"
+              placeholder="e.g., Exercise, Read, Meditate, Drink water..."
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
@@ -359,13 +410,14 @@ export function HabitModal({
 
         {/* Actions */}
         <div className="flex items-center justify-between pt-4 border-t border-border">
-          <div>
+          <div className="flex items-center gap-4">
             {mode === 'edit' && onDelete && habit?.id && !showDeleteConfirm && (
               <Button
                 type="button"
                 variant="ghost"
                 onClick={() => setShowDeleteConfirm(true)}
                 className="text-danger hover:bg-danger/10"
+                size="sm"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
                   <polyline points="3 6 5 6 21 6" />
@@ -374,13 +426,24 @@ export function HabitModal({
                 Delete
               </Button>
             )}
+            {mode === 'create' && (
+              <label className="flex items-center gap-2 text-sm text-text-muted cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={createAnother}
+                  onChange={(e) => setCreateAnother(e.target.checked)}
+                  className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                />
+                Create another
+              </label>
+            )}
           </div>
           <div className="flex gap-2">
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
             </Button>
             <Button type="submit" isLoading={isSaving}>
-              {mode === 'create' ? 'Create Habit' : 'Save Changes'}
+              {mode === 'create' ? (createAnother ? 'Create & Next' : 'Create Habit') : 'Save Changes'}
             </Button>
           </div>
         </div>

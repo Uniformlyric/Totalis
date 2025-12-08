@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Modal, Button, Input, Textarea, Badge } from '@/components/ui';
 import { MilestoneList } from './MilestoneList';
 import type { Project, Goal, Task } from '@totalis/shared';
@@ -57,6 +57,23 @@ export function ProjectModal({
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        formRef.current?.requestSubmit();
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
 
   // Helper to safely convert Firestore Timestamp or date to string
   const toDateString = (value: unknown): string => {
@@ -193,7 +210,7 @@ export function ProjectModal({
 
       {/* Details Tab */}
       {activeTab === 'details' && (
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form ref={formRef} onSubmit={handleSubmit} className="space-y-5">
         {/* Title */}
         <Input
           label="Project Name"
@@ -266,71 +283,95 @@ export function ProjectModal({
           </div>
         </div>
 
-        {/* Deadline and Estimated Hours */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-text mb-2">Deadline</label>
-            <input
-              type="date"
-              value={deadline}
-              onChange={(e) => setDeadline(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-          </div>
+        {/* Advanced options toggle (create mode only) */}
+        {mode === 'create' && !showAdvanced && (
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(true)}
+            className="flex items-center gap-2 text-sm text-text-muted hover:text-text transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="4" y1="21" x2="4" y2="14" />
+              <line x1="4" y1="10" x2="4" y2="3" />
+              <line x1="12" y1="21" x2="12" y2="12" />
+              <line x1="12" y1="8" x2="12" y2="3" />
+              <line x1="20" y1="21" x2="20" y2="16" />
+              <line x1="20" y1="12" x2="20" y2="3" />
+            </svg>
+            More options (deadline, hours, tags...)
+          </button>
+        )}
 
-          <div>
-            <label className="block text-sm font-medium text-text mb-2">
-              Estimated Hours
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.5"
-              value={estimatedHours}
-              onChange={(e) => setEstimatedHours(parseFloat(e.target.value) || 0)}
-              className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-          </div>
-        </div>
+        {/* Advanced fields - always shown in edit mode */}
+        {(showAdvanced || mode === 'edit') && (
+          <>
+            {/* Deadline and Estimated Hours */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-text mb-2">Deadline</label>
+                <input
+                  type="date"
+                  value={deadline}
+                  onChange={(e) => setDeadline(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
 
-        {/* Tags */}
-        <div>
-          <label className="block text-sm font-medium text-text mb-2">Tags</label>
-          <div className="flex flex-wrap gap-2 mb-2">
-            {tags.map((tag) => (
-              <Badge key={tag} variant="secondary" className="pl-2 pr-1 py-1">
-                {tag}
-                <button
-                  type="button"
-                  onClick={() => removeTag(tag)}
-                  className="ml-1 p-0.5 hover:bg-background rounded"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </Badge>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <Input
-              placeholder="Add a tag..."
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  addTag();
-                }
-              }}
-              className="flex-1"
-            />
-            <Button type="button" variant="secondary" onClick={addTag}>
-              Add
-            </Button>
-          </div>
-        </div>
+              <div>
+                <label className="block text-sm font-medium text-text mb-2">
+                  Estimated Hours
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={estimatedHours}
+                  onChange={(e) => setEstimatedHours(parseFloat(e.target.value) || 0)}
+                  className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+            </div>
+
+            {/* Tags */}
+            <div>
+              <label className="block text-sm font-medium text-text mb-2">Tags</label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {tags.map((tag) => (
+                  <Badge key={tag} variant="secondary" className="pl-2 pr-1 py-1">
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => removeTag(tag)}
+                      className="ml-1 p-0.5 hover:bg-background rounded"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Add a tag..."
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addTag();
+                    }
+                  }}
+                  className="flex-1"
+                />
+                <Button type="button" variant="secondary" onClick={addTag}>
+                  Add
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Delete Confirmation */}
         {showDeleteConfirm && onDelete && project?.id && (
@@ -406,6 +447,7 @@ export function ProjectModal({
             </Button>
             <Button type="submit" isLoading={isSaving}>
               {mode === 'create' ? 'Create Project' : 'Save Changes'}
+              <span className="ml-2 text-xs opacity-60">⌘↵</span>
             </Button>
           </div>
         </div>

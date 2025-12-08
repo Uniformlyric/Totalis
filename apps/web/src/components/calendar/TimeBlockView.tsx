@@ -452,10 +452,10 @@ export function TimeBlockView({
 
   // Suggest next task
   const handleSuggestNext = async () => {
-    const { suggestNextTask } = await import('@/lib/ai/auto-scheduler');
+    const { suggestNextTask } = await import('@/lib/scheduler/legacy-bridge');
     const suggestion = await suggestNextTask(unscheduledTasks);
-    if (suggestion) {
-      setSuggestedTask(suggestion);
+    if (suggestion.task) {
+      setSuggestedTask(suggestion.task);
     } else {
       alert('No urgent tasks to suggest!');
     }

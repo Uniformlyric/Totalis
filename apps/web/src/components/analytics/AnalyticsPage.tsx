@@ -3,7 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent, Badge, Button } from '@/compo
 import type { Task, Habit, HabitLog, FocusSession, Project, Goal } from '@totalis/shared';
 import type { User } from 'firebase/auth';
 
-type TimeRange = '7d' | '30d' | '90d';
+type TimeRange = 'week' | 'month' | 'quarter' | 'year';
 
 // Helper to safely convert Firestore Timestamp or date string to Date
 function toSafeDate(value: unknown): Date | null {
@@ -41,19 +41,35 @@ interface DailyStats {
   totalHabits: number;
 }
 
+interface PeriodComparison {
+  current: number;
+  previous: number;
+  change: number;
+  changePercent: number;
+}
+
 function StatCard({ 
   title, 
   value, 
   subtitle, 
   trend,
-  icon 
+  icon,
+  variant = 'default'
 }: { 
   title: string; 
   value: string | number; 
   subtitle?: string;
   trend?: { value: number; isPositive: boolean };
   icon: React.ReactNode;
+  variant?: 'default' | 'success' | 'warning' | 'danger';
 }) {
+  const variantClasses = {
+    default: 'bg-primary/10 text-primary',
+    success: 'bg-success/10 text-success',
+    warning: 'bg-warning/10 text-warning',
+    danger: 'bg-danger/10 text-danger',
+  };
+  
   return (
     <Card variant="bordered">
       <div className="flex items-start justify-between">
@@ -64,11 +80,11 @@ function StatCard({
           {trend && (
             <div className={`flex items-center gap-1 mt-2 text-xs ${trend.isPositive ? 'text-success' : 'text-danger'}`}>
               <span>{trend.isPositive ? '↑' : '↓'}</span>
-              <span>{Math.abs(trend.value)}% vs previous period</span>
+              <span>{Math.abs(trend.value)}% vs previous</span>
             </div>
           )}
         </div>
-        <div className="p-3 bg-primary/10 text-primary rounded-xl">
+        <div className={`p-3 rounded-xl ${variantClasses[variant]}`}>
           {icon}
         </div>
       </div>
@@ -205,7 +221,7 @@ function ProjectProgressChart({ projects }: { projects: Project[] }) {
 export function AnalyticsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [timeRange, setTimeRange] = useState<TimeRange>('7d');
+  const [timeRange, setTimeRange] = useState<TimeRange>('week');
   const [isLoading, setIsLoading] = useState(true);
   
   // Data
@@ -242,6 +258,16 @@ export function AnalyticsPage() {
 
     checkAuth();
   }, []);
+  
+  // Get number of days for time range
+  const getDaysForRange = (range: TimeRange): number => {
+    switch (range) {
+      case 'week': return 7;
+      case 'month': return 30;
+      case 'quarter': return 90;
+      case 'year': return 365;
+    }
+  };
 
   // Load data
   useEffect(() => {
@@ -271,9 +297,9 @@ export function AnalyticsPage() {
         });
         unsubscribes.push(unsubHabits);
 
-        // Load habit logs for the time range
+        // Load habit logs for the time range (load more for comparison)
         const { getAllLogsForDate } = await import('@/lib/db/habitLogs');
-        const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
+        const days = getDaysForRange(timeRange) * 2; // Double for comparison
         const allLogs: HabitLog[] = [];
         
         for (let i = 0; i < days; i++) {
@@ -318,10 +344,39 @@ export function AnalyticsPage() {
       unsubscribes.forEach((unsub) => unsub());
     };
   }, [authChecked, user, timeRange]);
+  
+  // Calculate schedule health
+  const scheduleHealth = useMemo(() => {
+    const incomplete = tasks.filter(t => t.status !== 'completed');
+    const scheduled = incomplete.filter(t => t.scheduledStart);
+    const unscheduled = incomplete.filter(t => !t.scheduledStart);
+    const withDeadline = incomplete.filter(t => t.dueDate);
+    const unscheduledWithDeadline = incomplete.filter(t => t.dueDate && !t.scheduledStart);
+    
+    // Overdue tasks
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const overdue = incomplete.filter(t => {
+      const due = toSafeDate(t.dueDate);
+      return due && due < now;
+    });
+    
+    return {
+      total: incomplete.length,
+      scheduled: scheduled.length,
+      unscheduled: unscheduled.length,
+      withDeadline: withDeadline.length,
+      unscheduledWithDeadline: unscheduledWithDeadline.length,
+      overdue: overdue.length,
+      scheduledPercent: incomplete.length > 0 
+        ? Math.round((scheduled.length / incomplete.length) * 100) 
+        : 0,
+    };
+  }, [tasks]);
 
   // Calculate daily stats
   const dailyStats = useMemo(() => {
-    const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
+    const days = getDaysForRange(timeRange);
     const stats: DailyStats[] = [];
 
     for (let i = days - 1; i >= 0; i--) {
@@ -367,6 +422,72 @@ export function AnalyticsPage() {
 
     return stats;
   }, [tasks, focusSessions, habitLogs, habits, timeRange]);
+  
+  // Calculate period comparison (current vs previous)
+  const periodComparison = useMemo(() => {
+    const days = getDaysForRange(timeRange);
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    
+    const periodStart = new Date(now);
+    periodStart.setDate(periodStart.getDate() - days);
+    
+    const prevPeriodStart = new Date(periodStart);
+    prevPeriodStart.setDate(prevPeriodStart.getDate() - days);
+    
+    // Current period tasks
+    const currentTasks = tasks.filter(t => {
+      const completed = toSafeDate(t.completedAt);
+      return completed && completed >= periodStart && completed <= now;
+    }).length;
+    
+    // Previous period tasks
+    const prevTasks = tasks.filter(t => {
+      const completed = toSafeDate(t.completedAt);
+      return completed && completed >= prevPeriodStart && completed < periodStart;
+    }).length;
+    
+    // Current period focus
+    const currentFocus = focusSessions
+      .filter(s => {
+        const started = toSafeDate(s.startedAt);
+        return started && started >= periodStart && started <= now && s.status === 'completed';
+      })
+      .reduce((sum, s) => sum + (s.actualDuration || 0), 0);
+    
+    // Previous period focus
+    const prevFocus = focusSessions
+      .filter(s => {
+        const started = toSafeDate(s.startedAt);
+        return started && started >= prevPeriodStart && started < periodStart && s.status === 'completed';
+      })
+      .reduce((sum, s) => sum + (s.actualDuration || 0), 0);
+    
+    // Current habits
+    const currentHabits = habitLogs.filter(l => {
+      const logDate = new Date(l.date);
+      return logDate >= periodStart && logDate <= now && l.completed;
+    }).length;
+    
+    // Previous habits
+    const prevHabits = habitLogs.filter(l => {
+      const logDate = new Date(l.date);
+      return logDate >= prevPeriodStart && logDate < periodStart && l.completed;
+    }).length;
+    
+    const calcChange = (current: number, previous: number): PeriodComparison => ({
+      current,
+      previous,
+      change: current - previous,
+      changePercent: previous > 0 ? Math.round(((current - previous) / previous) * 100) : current > 0 ? 100 : 0,
+    });
+    
+    return {
+      tasks: calcChange(currentTasks, prevTasks),
+      focus: calcChange(currentFocus, prevFocus),
+      habits: calcChange(currentHabits, prevHabits),
+    };
+  }, [tasks, focusSessions, habitLogs, timeRange]);
 
   // Calculate summary stats
   const summaryStats = useMemo(() => {
@@ -388,7 +509,7 @@ export function AnalyticsPage() {
       : 0;
 
     // Best streak
-    const bestStreak = habits.reduce((max, h) => Math.max(max, h.longestStreak), 0);
+    const bestStreak = habits.reduce((max, h) => Math.max(max, h.longestStreak || 0), 0);
 
     // Active goals
     const activeGoals = goals.filter(g => g.status === 'active').length;
@@ -431,29 +552,96 @@ export function AnalyticsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-text">Analytics</h1>
-          <p className="text-text-secondary mt-1">Track your productivity trends</p>
+          <h1 className="text-2xl font-bold text-text">Analytics Dashboard</h1>
+          <p className="text-text-secondary mt-1">Holistic view of your productivity trends</p>
         </div>
         <div className="flex gap-2">
-          {(['7d', '30d', '90d'] as TimeRange[]).map((range) => (
+          {(['week', 'month', 'quarter', 'year'] as TimeRange[]).map((range) => (
             <Button
               key={range}
               variant={timeRange === range ? 'primary' : 'secondary'}
               size="sm"
               onClick={() => setTimeRange(range)}
             >
-              {range === '7d' ? '7 Days' : range === '30d' ? '30 Days' : '90 Days'}
+              {range === 'week' ? 'Week' : range === 'month' ? 'Month' : range === 'quarter' ? 'Quarter' : 'Year'}
             </Button>
           ))}
         </div>
       </div>
+      
+      {/* Schedule Health Overview */}
+      <Card variant="bordered" className="bg-gradient-to-r from-surface to-surface-hover">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            📊 Schedule Health
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div className="text-center p-3 bg-surface rounded-lg">
+              <div className="text-2xl font-bold text-text">{scheduleHealth.total}</div>
+              <div className="text-xs text-text-muted">Total Tasks</div>
+            </div>
+            <div className="text-center p-3 bg-success/10 rounded-lg">
+              <div className="text-2xl font-bold text-success">{scheduleHealth.scheduled}</div>
+              <div className="text-xs text-text-muted">Scheduled</div>
+            </div>
+            <div className="text-center p-3 bg-warning/10 rounded-lg">
+              <div className="text-2xl font-bold text-warning">{scheduleHealth.unscheduled}</div>
+              <div className="text-xs text-text-muted">Unscheduled</div>
+            </div>
+            <div className="text-center p-3 bg-danger/10 rounded-lg">
+              <div className="text-2xl font-bold text-danger">{scheduleHealth.overdue}</div>
+              <div className="text-xs text-text-muted">Overdue</div>
+            </div>
+            <div className="text-center p-3 bg-amber-500/10 rounded-lg">
+              <div className="text-2xl font-bold text-amber-500">{scheduleHealth.unscheduledWithDeadline}</div>
+              <div className="text-xs text-text-muted">Due, Unscheduled</div>
+            </div>
+            <div className="text-center p-3 bg-primary/10 rounded-lg">
+              <div className="text-2xl font-bold text-primary">{scheduleHealth.scheduledPercent}%</div>
+              <div className="text-xs text-text-muted">Scheduled Rate</div>
+            </div>
+          </div>
+          
+          {/* Schedule health bar */}
+          <div className="mt-4">
+            <div className="h-3 rounded-full bg-surface-hover overflow-hidden flex">
+              <div 
+                className="h-full bg-success transition-all" 
+                style={{ width: `${scheduleHealth.scheduledPercent}%` }}
+                title={`${scheduleHealth.scheduled} scheduled`}
+              />
+              <div 
+                className="h-full bg-warning transition-all" 
+                style={{ width: `${scheduleHealth.total > 0 ? ((scheduleHealth.unscheduled - scheduleHealth.overdue) / scheduleHealth.total) * 100 : 0}%` }}
+                title={`${scheduleHealth.unscheduled - scheduleHealth.overdue} unscheduled`}
+              />
+              <div 
+                className="h-full bg-danger transition-all" 
+                style={{ width: `${scheduleHealth.total > 0 ? (scheduleHealth.overdue / scheduleHealth.total) * 100 : 0}%` }}
+                title={`${scheduleHealth.overdue} overdue`}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-text-muted mt-1">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 bg-success rounded-full" /> Scheduled</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 bg-warning rounded-full" /> Unscheduled</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 bg-danger rounded-full" /> Overdue</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-      {/* Summary Stats */}
+      {/* Summary Stats with Trends */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Tasks Completed"
           value={summaryStats.totalTasksCompleted}
           subtitle={`${summaryStats.avgTasksPerDay} avg/day`}
+          trend={periodComparison.tasks.previous > 0 ? {
+            value: periodComparison.tasks.changePercent,
+            isPositive: periodComparison.tasks.changePercent >= 0
+          } : undefined}
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 11l3 3L22 4" />
@@ -465,6 +653,10 @@ export function AnalyticsPage() {
           title="Focus Time"
           value={`${Math.floor(summaryStats.totalFocusMinutes / 60)}h ${summaryStats.totalFocusMinutes % 60}m`}
           subtitle={`${summaryStats.avgFocusPerDay} min avg/day`}
+          trend={periodComparison.focus.previous > 0 ? {
+            value: periodComparison.focus.changePercent,
+            isPositive: periodComparison.focus.changePercent >= 0
+          } : undefined}
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10"/>
@@ -476,6 +668,10 @@ export function AnalyticsPage() {
           title="Habit Completion"
           value={`${summaryStats.habitCompletionRate}%`}
           subtitle={`Best streak: ${summaryStats.bestStreak} days`}
+          trend={periodComparison.habits.previous > 0 ? {
+            value: periodComparison.habits.changePercent,
+            isPositive: periodComparison.habits.changePercent >= 0
+          } : undefined}
           icon={
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 20v-6M6 20V10M18 20V4" />

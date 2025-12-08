@@ -24,6 +24,8 @@ export function FocusTimer({ task, onSessionStart, onSessionEnd }: FocusTimerPro
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionsCompleted, setSessionsCompleted] = useState(0);
   const [startTime, setStartTime] = useState<Date | null>(null);
+  const [autoCycle, setAutoCycle] = useState(true); // Auto-cycle between focus and breaks
+  const [pendingAutoStart, setPendingAutoStart] = useState(false); // Flag for auto-starting next session
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -93,6 +95,8 @@ export function FocusTimer({ task, onSessionStart, onSessionEnd }: FocusTimerPro
       });
     }
 
+    let nextMode: TimerMode;
+    
     if (mode === 'focus' && sessionId) {
       // Complete the focus session
       try {
@@ -106,21 +110,38 @@ export function FocusTimer({ task, onSessionStart, onSessionEnd }: FocusTimerPro
         setSessionsCompleted((prev) => prev + 1);
         
         // Determine next break type
-        const nextMode = (sessionsCompleted + 1) % 4 === 0 ? 'longBreak' : 'shortBreak';
-        setMode(nextMode);
-        setTimeLeft(TIMER_DURATIONS[nextMode]);
+        nextMode = (sessionsCompleted + 1) % 4 === 0 ? 'longBreak' : 'shortBreak';
       } catch (err) {
         console.error('Failed to update session:', err);
+        nextMode = 'shortBreak';
       }
     } else {
       // Break is complete, switch to focus
-      setMode('focus');
-      setTimeLeft(TIMER_DURATIONS.focus);
+      nextMode = 'focus';
     }
     
+    setMode(nextMode);
+    setTimeLeft(TIMER_DURATIONS[nextMode]);
     setSessionId(null);
     setStartTime(null);
-  }, [mode, sessionId, sessionsCompleted]);
+    
+    // Auto-cycle: automatically start the next session after a brief delay
+    if (autoCycle) {
+      setPendingAutoStart(true);
+    }
+  }, [mode, sessionId, sessionsCompleted, autoCycle]);
+  
+  // Handle auto-start after mode change
+  useEffect(() => {
+    if (pendingAutoStart && !isRunning) {
+      // Small delay to let user see the transition
+      const timer = setTimeout(() => {
+        setPendingAutoStart(false);
+        handleStart();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [pendingAutoStart, isRunning]);
 
   // Start timer
   const handleStart = async () => {
@@ -157,8 +178,11 @@ export function FocusTimer({ task, onSessionStart, onSessionEnd }: FocusTimerPro
     setIsPaused(false);
   };
 
-  // Stop timer
+  // Stop timer completely (also stops auto-cycle)
   const handleStop = async () => {
+    // Cancel any pending auto-start
+    setPendingAutoStart(false);
+    
     if (sessionId && mode === 'focus') {
       // Mark session as interrupted
       try {
@@ -183,6 +207,16 @@ export function FocusTimer({ task, onSessionStart, onSessionEnd }: FocusTimerPro
     setSessionId(null);
     setStartTime(null);
   };
+  
+  // End entire focus session (stop auto-cycling)
+  const handleEndSession = async () => {
+    setPendingAutoStart(false);
+    setAutoCycle(false);
+    await handleStop();
+    // Reset to focus mode
+    setMode('focus');
+    setTimeLeft(TIMER_DURATIONS.focus);
+  };
 
   // Change mode
   const handleModeChange = (newMode: TimerMode) => {
@@ -200,6 +234,30 @@ export function FocusTimer({ task, onSessionStart, onSessionEnd }: FocusTimerPro
 
   return (
     <Card variant="bordered" className="text-center">
+      {/* Auto-cycle toggle */}
+      <div className="flex items-center justify-center gap-3 mb-4 pb-4 border-b border-border">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={autoCycle}
+            onChange={(e) => setAutoCycle(e.target.checked)}
+            className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+          />
+          <span className="text-sm text-text">Auto-cycle</span>
+        </label>
+        <span className="text-xs text-text-muted">
+          {autoCycle 
+            ? '🔄 Will auto-start next session' 
+            : '⏸️ Manual control'
+          }
+        </span>
+        {pendingAutoStart && (
+          <Badge variant="primary" size="sm" className="animate-pulse">
+            Starting in 1s...
+          </Badge>
+        )}
+      </div>
+      
       {/* Mode selector */}
       <div className="flex justify-center gap-2 mb-6">
         {(['focus', 'shortBreak', 'longBreak'] as TimerMode[]).map((m) => (
@@ -272,43 +330,57 @@ export function FocusTimer({ task, onSessionStart, onSessionEnd }: FocusTimerPro
       </div>
 
       {/* Controls */}
-      <div className="flex justify-center gap-3 mb-4">
-        {!isRunning ? (
-          <Button size="lg" onClick={handleStart}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none" className="mr-2">
-              <polygon points="5 3 19 12 5 21 5 3" />
-            </svg>
-            Start
-          </Button>
-        ) : isPaused ? (
-          <>
-            <Button size="lg" onClick={handleResume}>
+      <div className="flex flex-col items-center gap-3 mb-4">
+        <div className="flex justify-center gap-3">
+          {!isRunning && !pendingAutoStart ? (
+            <Button size="lg" onClick={handleStart}>
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none" className="mr-2">
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
-              Resume
+              Start
             </Button>
-            <Button size="lg" variant="danger" onClick={handleStop}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none" className="mr-2">
-                <rect x="6" y="4" width="4" height="16" />
-                <rect x="14" y="4" width="4" height="16" />
-              </svg>
-              Stop
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button size="lg" variant="secondary" onClick={handlePause}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none" className="mr-2">
-                <rect x="6" y="4" width="4" height="16" />
-                <rect x="14" y="4" width="4" height="16" />
-              </svg>
-              Pause
-            </Button>
-            <Button size="lg" variant="danger" onClick={handleStop}>
-              Stop
-            </Button>
-          </>
+          ) : isPaused ? (
+            <>
+              <Button size="lg" onClick={handleResume}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none" className="mr-2">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                Resume
+              </Button>
+              <Button size="lg" variant="danger" onClick={handleStop}>
+                Skip
+              </Button>
+            </>
+          ) : pendingAutoStart ? (
+            <>
+              <Button size="lg" variant="secondary" onClick={() => setPendingAutoStart(false)}>
+                Skip Next
+              </Button>
+              <Button size="lg" variant="danger" onClick={handleEndSession}>
+                End Session
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button size="lg" variant="secondary" onClick={handlePause}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none" className="mr-2">
+                  <rect x="6" y="4" width="4" height="16" />
+                  <rect x="14" y="4" width="4" height="16" />
+                </svg>
+                Pause
+              </Button>
+              <Button size="lg" variant="secondary" onClick={handleStop}>
+                Skip
+              </Button>
+            </>
+          )}
+        </div>
+        
+        {/* End Session button - always visible when timer is active or auto-cycling */}
+        {(isRunning || pendingAutoStart || sessionsCompleted > 0) && !pendingAutoStart && (
+          <Button size="sm" variant="danger" onClick={handleEndSession}>
+            🛑 End Focus Session
+          </Button>
         )}
       </div>
 

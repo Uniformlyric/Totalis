@@ -248,6 +248,33 @@ export function subscribeToMilestones(
 }
 
 /**
+ * Subscribe to ALL milestones for a user (for modal dropdowns)
+ */
+export function subscribeToAllMilestones(
+  userId: string,
+  callback: (milestones: Milestone[]) => void
+): Unsubscribe {
+  const milestonesCol = getMilestonesCollection(userId);
+  const q = query(milestonesCol, orderBy('order', 'asc'));
+
+  return onSnapshot(q, (snapshot) => {
+    const milestones = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        createdAt: data.createdAt?.toDate?.() || data.createdAt,
+        updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
+        startDate: data.startDate?.toDate?.() || data.startDate,
+        deadline: data.deadline?.toDate?.() || data.deadline,
+        completedAt: data.completedAt?.toDate?.() || data.completedAt,
+      } as Milestone;
+    });
+    callback(milestones);
+  });
+}
+
+/**
  * Calculate and update milestone progress based on tasks
  */
 export async function recalculateMilestoneProgress(milestoneId: string): Promise<void> {

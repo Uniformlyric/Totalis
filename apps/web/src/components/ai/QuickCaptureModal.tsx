@@ -13,6 +13,7 @@ import type {
   ExistingHabit,
   ExistingProject,
   ExistingGoal,
+  UpdateItem,
 } from '@/lib/ai/gemini';
 import { chatWithGemini } from '@/lib/ai/gemini';
 import type { Project, Goal, Task, Habit } from '@totalis/shared';
@@ -36,6 +37,7 @@ interface QuickCaptureModalProps {
   isOpen: boolean;
   onClose: () => void;
   onItemsCreated: (items: ParsedItem[]) => void;
+  onItemsUpdated: (updates: UpdateItem[]) => void;
   existingTasks: Task[];
   existingHabits: Habit[];
   existingProjects: Project[];
@@ -303,6 +305,7 @@ export function QuickCaptureModal({
   isOpen,
   onClose,
   onItemsCreated,
+  onItemsUpdated,
   existingTasks,
   existingHabits,
   existingProjects,
@@ -313,6 +316,7 @@ export function QuickCaptureModal({
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pendingItems, setPendingItems] = useState<ParsedItem[]>([]);
+  const [pendingUpdates, setPendingUpdates] = useState<UpdateItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -429,6 +433,13 @@ export function QuickCaptureModal({
       if (result.items.length > 0) {
         setPendingItems(prev => [...prev, ...result.items]);
       }
+
+      // Process updates immediately (they modify existing items)
+      if (result.updates && result.updates.length > 0) {
+        console.log('[QuickCapture] Processing updates:', result.updates);
+        await onItemsUpdated(result.updates);
+        setPendingUpdates(prev => [...prev, ...result.updates]);
+      }
     } catch (err) {
       console.error('Chat error:', err);
       setError('Failed to process your message. Please try again.');
@@ -462,6 +473,7 @@ export function QuickCaptureModal({
     if (pendingItems.length === 0) return;
     onItemsCreated(pendingItems);
     setPendingItems([]);
+    setPendingUpdates([]);
     setMessages([]);
     onClose();
   };
@@ -469,6 +481,7 @@ export function QuickCaptureModal({
   // Clear all
   const handleClearAll = () => {
     setPendingItems([]);
+    setPendingUpdates([]);
     setMessages([{
       role: 'assistant',
       content: "I've cleared everything. What would you like to add?",

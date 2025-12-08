@@ -61,7 +61,7 @@ export function Modal({
       <div
         className={`
           w-full ${sizeStyles[size]} bg-surface rounded-2xl shadow-xl
-          animate-scale-in
+          animate-scale-in max-h-[90vh] flex flex-col
         `}
         role="dialog"
         aria-modal="true"
@@ -98,7 +98,7 @@ export function Modal({
             )}
           </div>
         )}
-        <div className="p-6">{children}</div>
+        <div className="p-6 overflow-y-auto flex-1">{children}</div>
       </div>
     </div>,
     document.body

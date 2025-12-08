@@ -486,8 +486,15 @@ export function SettingsPage() {
       }
     } catch (err) {
       console.error('Email scan failed:', err);
-      setSaveMessage({ type: 'error', text: 'Failed to scan emails. Please try again.' });
-      setTimeout(() => setSaveMessage(null), 3000);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to scan emails. Please try again.';
+      
+      // If session expired, update the Gmail status to show disconnect
+      if (errorMessage.includes('expired') || errorMessage.includes('reconnect')) {
+        setGmailStatus({ connected: false });
+      }
+      
+      setSaveMessage({ type: 'error', text: errorMessage });
+      setTimeout(() => setSaveMessage(null), 5000);
     } finally {
       setIsScanningEmails(false);
       setScanProgress(null);
@@ -865,6 +872,162 @@ export function SettingsPage() {
             <div>
               <label className="block text-sm font-medium text-text mb-2">Timezone</label>
               <p className="text-text-secondary">{settings.timezone}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Energy Profile */}
+        <Card variant="bordered">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <span className="text-xl">⚡</span>
+              Energy Profile
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-text mb-2">When are you most productive?</label>
+              <p className="text-sm text-text-secondary mb-4">
+                This helps the scheduler assign high-focus tasks to your peak hours
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  { value: 'morning-person' as const, label: '🌅 Morning Person', desc: 'Peak: 6 AM - 11 AM' },
+                  { value: 'night-owl' as const, label: '🦉 Night Owl', desc: 'Peak: 8 PM - Midnight' },
+                  { value: 'steady' as const, label: '⚖️ Steady', desc: 'Consistent throughout' },
+                ].map(option => {
+                  const isSelected = settings.energyProfile === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => updateSettings(prev => ({ ...prev, energyProfile: option.value }))}
+                      className={`p-4 rounded-xl text-left transition-all border-2 ${
+                        isSelected
+                          ? 'border-primary bg-primary/10'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="font-medium text-text">{option.label}</div>
+                      <div className="text-xs text-text-muted mt-1">{option.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            
+            {settings.energyProfile && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-text mb-2">Peak Energy Start</label>
+                    <Input
+                      type="time"
+                      value={settings.peakEnergyHours?.start || (settings.energyProfile === 'morning-person' ? '06:00' : settings.energyProfile === 'night-owl' ? '20:00' : '10:00')}
+                      onChange={(e) => updateSettings(prev => ({
+                        ...prev,
+                        peakEnergyHours: { 
+                          start: e.target.value, 
+                          end: prev.peakEnergyHours?.end || (prev.energyProfile === 'morning-person' ? '11:00' : prev.energyProfile === 'night-owl' ? '23:59' : '12:00')
+                        }
+                      }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-text mb-2">Peak Energy End</label>
+                    <Input
+                      type="time"
+                      value={settings.peakEnergyHours?.end || (settings.energyProfile === 'morning-person' ? '11:00' : settings.energyProfile === 'night-owl' ? '23:59' : '12:00')}
+                      onChange={(e) => updateSettings(prev => ({
+                        ...prev,
+                        peakEnergyHours: { 
+                          start: prev.peakEnergyHours?.start || (prev.energyProfile === 'morning-person' ? '06:00' : prev.energyProfile === 'night-owl' ? '20:00' : '10:00'),
+                          end: e.target.value 
+                        }
+                      }))}
+                    />
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-text mb-2">Low Energy Start</label>
+                    <Input
+                      type="time"
+                      value={settings.lowEnergyHours?.start || (settings.energyProfile === 'morning-person' ? '14:00' : settings.energyProfile === 'night-owl' ? '08:00' : '14:00')}
+                      onChange={(e) => updateSettings(prev => ({
+                        ...prev,
+                        lowEnergyHours: { 
+                          start: e.target.value, 
+                          end: prev.lowEnergyHours?.end || (prev.energyProfile === 'morning-person' ? '16:00' : prev.energyProfile === 'night-owl' ? '11:00' : '15:00')
+                        }
+                      }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-text mb-2">Low Energy End</label>
+                    <Input
+                      type="time"
+                      value={settings.lowEnergyHours?.end || (settings.energyProfile === 'morning-person' ? '16:00' : settings.energyProfile === 'night-owl' ? '11:00' : '15:00')}
+                      onChange={(e) => updateSettings(prev => ({
+                        ...prev,
+                        lowEnergyHours: { 
+                          start: prev.lowEnergyHours?.start || (prev.energyProfile === 'morning-person' ? '14:00' : prev.energyProfile === 'night-owl' ? '08:00' : '14:00'),
+                          end: e.target.value 
+                        }
+                      }))}
+                    />
+                  </div>
+                </div>
+                
+                <div className="p-4 bg-surface-hover rounded-xl">
+                  <p className="text-sm text-text-secondary">
+                    💡 <strong>How it works:</strong> High-focus tasks (urgent, long, or tagged "deep-work") will be scheduled during your peak hours. 
+                    Low-focus tasks (quick admin, emails) will be scheduled during your energy dip.
+                  </p>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Google Calendar Integration */}
+        <Card variant="bordered">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <span className="text-xl">📅</span>
+              Google Calendar
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-text-secondary">
+              Connect your Google Calendar to sync events and avoid double-booking. The scheduler will treat your calendar events as blocked time.
+            </p>
+            
+            <div className="p-4 bg-surface-hover rounded-xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500">
+                      <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                      <line x1="16" y1="2" x2="16" y2="6"/>
+                      <line x1="8" y1="2" x2="8" y2="6"/>
+                      <line x1="3" y1="10" x2="21" y2="10"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="font-medium text-text">Google Calendar</p>
+                    <p className="text-sm text-text-muted">Coming soon - Sync with your calendar</p>
+                  </div>
+                </div>
+                <Button variant="secondary" disabled>
+                  Connect
+                </Button>
+              </div>
+            </div>
+            
+            <div className="text-xs text-text-muted">
+              ✨ <strong>Coming features:</strong> Two-way sync, import events as blocked time, export Totalis schedule to calendar
             </div>
           </CardContent>
         </Card>

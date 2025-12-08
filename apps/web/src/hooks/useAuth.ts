@@ -25,6 +25,7 @@ const defaultSettings: UserSettings = {
     pushNotifications: true,
   },
   workingHours: { start: '09:00', end: '17:00' },
+  workingDays: [1, 2, 3, 4, 5], // Monday - Friday
   weeklyCapacity: 40,
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 };

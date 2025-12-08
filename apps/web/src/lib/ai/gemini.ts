@@ -65,6 +65,60 @@ export interface ParsedGoal {
 
 export type ParsedItem = ParsedTask | ParsedHabit | ParsedProject | ParsedGoal;
 
+// Update types for modifying existing items
+export interface UpdateTask {
+  type: 'update_task';
+  id: string; // ID of existing task to update
+  title?: string;
+  description?: string;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  dueDate?: string | null;
+  status?: string;
+  estimatedMinutes?: number;
+  tags?: string[];
+}
+
+export interface UpdateHabit {
+  type: 'update_habit';
+  id: string;
+  title?: string;
+  description?: string;
+  frequency?: 'daily' | 'weekly' | 'custom';
+  daysOfWeek?: number[];
+  targetPerDay?: number;
+  reminderTime?: string;
+  color?: string;
+  tags?: string[];
+}
+
+export interface UpdateProject {
+  type: 'update_project';
+  id: string;
+  title?: string;
+  description?: string;
+  deadline?: string | null;
+  estimatedHours?: number;
+  status?: string;
+  color?: string;
+  tags?: string[];
+}
+
+export interface UpdateGoal {
+  type: 'update_goal';
+  id: string;
+  title?: string;
+  description?: string;
+  deadline?: string | null;
+  timeframe?: 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom';
+  targetValue?: number;
+  unit?: string;
+  status?: string;
+  color?: string;
+  tags?: string[];
+}
+
+export type UpdateItem = UpdateTask | UpdateHabit | UpdateProject | UpdateGoal;
+
 export interface UserCapacityContext {
   weeklyCapacity: number; // hours per week
   workingHours: { start: string; end: string };
@@ -72,12 +126,30 @@ export interface UserCapacityContext {
   upcomingDeadlines: Array<{ title: string; date: string; hoursRemaining: number }>;
 }
 
+// Scheduling command detected by AI
+export interface ParsedSchedulingCommand {
+  type: 'schedule_unscheduled' | 'reschedule_period' | 'optimize_schedule' | 'emergency_insert' 
+      | 'find_time' | 'clear_schedule' | 'analyze_schedule' | 'move_task' | 'batch_schedule' | 'rebalance';
+  scope: 'day' | 'week' | 'month' | 'quarter' | 'year' | 'all';
+  targetDate?: string; // ISO date
+  targetTaskId?: string;
+  targetProjectId?: string;
+  urgency?: 'normal' | 'urgent' | 'emergency';
+  constraints?: {
+    preferredTime?: 'morning' | 'afternoon' | 'evening';
+    mustCompleteBefore?: string; // ISO date
+    maxHoursPerDay?: number;
+  };
+}
+
 export interface ParseResult {
   items: ParsedItem[];
+  updates: UpdateItem[]; // Updates to existing items
   message: string; // AI's conversational response
   suggestions?: string[]; // Follow-up suggestions
   clarificationNeeded?: boolean;
   clarificationQuestion?: string;
+  schedulingCommand?: ParsedSchedulingCommand; // Scheduling action detected
 }
 
 export interface ChatMessage {
@@ -85,6 +157,7 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
   parsedItems?: ParsedItem[];
+  schedulingCommand?: ParsedSchedulingCommand;
 }
 
 export interface ExistingTask {
@@ -203,11 +276,13 @@ ${pendingItemsList}
 1. **NEVER CREATE DUPLICATES**: Before creating any item, check if something similar already exists above. 
    - If user mentions "Complete Totalis App" and a goal/project "Complete Totalis App" exists, DO NOT create a new one.
    - If user mentions "workout" and a habit "Workout" exists, DO NOT create a new one.
-   - Instead, acknowledge the existing item and ask if they want to update it.
+   - Instead, use the "updates" array to modify the existing item.
 
-2. **RECOGNIZE EXISTING ITEMS**: When user references something that exists:
-   - Respond with "I see you already have [item]. Would you like me to update it instead?"
-   - Or ask clarifying questions like "Did you mean your existing [item], or is this something new?"
+2. **HANDLE MODIFICATIONS**: When user wants to change an existing item:
+   - Find the item's ID from the EXISTING DATA above
+   - Add an update object to the "updates" array with the ID and changed fields
+   - Confirm the change in your message
+   - Example: User says "change the budget app deadline to next week" → Find the project ID and add update
 
 3. **BE CONVERSATIONAL**: You're a personal assistant, not just a parser. 
    - Acknowledge what you understood
@@ -233,21 +308,27 @@ ${pendingItemsList}
 Always respond with valid JSON:
 {
   "items": [],  // ONLY new items that DON'T already exist
+  "updates": [], // Updates to existing items (see UPDATE SCHEMAS below)
   "message": "Your conversational response",
   "suggestions": ["Optional helpful suggestions"],
-  "existingItemsReferenced": [
-    // If user mentioned existing items, list them here
-    {"type": "habit", "title": "Workout", "suggestion": "update schedule"}
-  ],
   "clarificationNeeded": false,
   "clarificationQuestion": null
 }
 
-====== ITEM SCHEMAS ======
+====== ITEM SCHEMAS (for new items) ======
 
 Task: { "type": "task", "title": "string", "priority": "low|medium|high|urgent", "dueDate": "ISO date or null", "projectName": "optional", "estimatedMinutes": number, "tags": [] }
 
 Habit: { "type": "habit", "title": "string", "frequency": "daily|weekly|custom", "daysOfWeek": [0-6], "reminderTime": "HH:MM or null", "color": "hex", "tags": [] }
+
+====== UPDATE SCHEMAS (for modifying existing items) ======
+
+Update Task: { "type": "update_task", "id": "existing-task-id", "dueDate": "new ISO date", ... only include fields to change }
+Update Habit: { "type": "update_habit", "id": "existing-habit-id", "frequency": "daily", ... only include fields to change }
+Update Project: { "type": "update_project", "id": "existing-project-id", "deadline": "new ISO date", ... only include fields to change }
+Update Goal: { "type": "update_goal", "id": "existing-goal-id", "deadline": "new ISO date", ... only include fields to change }
+
+====== PROJECT SCHEMA (for new projects) ======
 
 Project WITH MILESTONES: {
   "type": "project",
@@ -388,6 +469,43 @@ User: "Start exercising daily"
 - If NO → Create new habit
 - If YES → "You already have a 'Workout' habit. Would you like to update its schedule instead?"
 
+====== SCHEDULING COMMANDS ======
+
+You can help users manage their schedule! Detect these scheduling intents:
+
+1. **SCHEDULE UNSCHEDULED**: "Schedule my tasks", "Find time for my unscheduled items", "Auto-schedule everything"
+2. **RESCHEDULE PERIOD**: "Reschedule my week", "Redo my schedule", "Rebuild today's schedule"
+3. **OPTIMIZE SCHEDULE**: "I'm overloaded", "Fix my schedule", "Help me rebalance", "Too many tasks"
+4. **EMERGENCY INSERT**: "Something urgent came up", "Need to fit in an emergency meeting", "Squeeze in a call"
+5. **FIND TIME**: "Find time for a 2-hour meeting", "When can I work on this?", "Where should I put..."
+6. **CLEAR SCHEDULE**: "Clear my schedule", "Unschedule everything", "Start fresh"
+7. **ANALYZE SCHEDULE**: "How does my schedule look?", "Am I overbooked?", "Review my schedule"
+8. **MOVE TASK**: "Move [task] to Thursday", "Reschedule [task] for tomorrow"
+
+When you detect a SCHEDULING COMMAND, include it in your response:
+
+{
+  "items": [],
+  "message": "Your response",
+  "schedulingCommand": {
+    "type": "schedule_unscheduled|reschedule_period|optimize_schedule|emergency_insert|find_time|clear_schedule|analyze_schedule|move_task|batch_schedule|rebalance",
+    "scope": "day|week|month|year|all",
+    "targetDate": "ISO date if specific day mentioned",
+    "urgency": "normal|urgent|emergency",
+    "constraints": {
+      "preferredTime": "morning|afternoon|evening (if mentioned)",
+      "maxHoursPerDay": number (if mentioned)
+    }
+  }
+}
+
+Example scheduling requests:
+- "Schedule all my unscheduled tasks for this month" → type: schedule_unscheduled, scope: month
+- "I'm swamped this week, help!" → type: optimize_schedule, scope: week
+- "Reschedule today's tasks" → type: reschedule_period, scope: day
+- "Find time for a 3-hour deep work session tomorrow morning" → type: find_time, scope: day, preferredTime: morning
+- "Clear my schedule for today and start over" → type: clear_schedule, scope: day
+
 Remember: You are a SMART assistant. Don't blindly create - think first!`;
 }
 
@@ -399,6 +517,7 @@ function parseAIResponse(responseText: string): ParseResult {
     if (!jsonMatch) {
       return {
         items: [],
+        updates: [],
         message: responseText,
         clarificationNeeded: true,
         clarificationQuestion: "I couldn't parse that properly. Could you rephrase?",
@@ -487,17 +606,98 @@ function parseAIResponse(responseText: string): ParseResult {
       }
     }).filter(Boolean);
 
+    // Extract scheduling command if present
+    let schedulingCommand: ParsedSchedulingCommand | undefined;
+    if (parsed.schedulingCommand) {
+      const cmd = parsed.schedulingCommand;
+      schedulingCommand = {
+        type: cmd.type,
+        scope: cmd.scope || 'week',
+        targetDate: cmd.targetDate,
+        targetTaskId: cmd.targetTaskId,
+        targetProjectId: cmd.targetProjectId,
+        urgency: cmd.urgency || 'normal',
+        constraints: cmd.constraints,
+      };
+    }
+
+    // Parse updates to existing items
+    const updates: UpdateItem[] = (parsed.updates || []).map((update: any) => {
+      switch (update.type) {
+        case 'update_task':
+          return {
+            type: 'update_task',
+            id: update.id,
+            title: update.title,
+            description: update.description,
+            priority: update.priority,
+            dueDate: update.dueDate,
+            status: update.status,
+            estimatedMinutes: update.estimatedMinutes,
+            tags: update.tags,
+          } as UpdateTask;
+        
+        case 'update_habit':
+          return {
+            type: 'update_habit',
+            id: update.id,
+            title: update.title,
+            description: update.description,
+            frequency: update.frequency,
+            daysOfWeek: update.daysOfWeek,
+            targetPerDay: update.targetPerDay,
+            reminderTime: update.reminderTime,
+            color: update.color,
+            tags: update.tags,
+          } as UpdateHabit;
+        
+        case 'update_project':
+          return {
+            type: 'update_project',
+            id: update.id,
+            title: update.title,
+            description: update.description,
+            deadline: update.deadline,
+            estimatedHours: update.estimatedHours,
+            status: update.status,
+            color: update.color,
+            tags: update.tags,
+          } as UpdateProject;
+        
+        case 'update_goal':
+          return {
+            type: 'update_goal',
+            id: update.id,
+            title: update.title,
+            description: update.description,
+            deadline: update.deadline,
+            timeframe: update.timeframe,
+            targetValue: update.targetValue,
+            unit: update.unit,
+            status: update.status,
+            color: update.color,
+            tags: update.tags,
+          } as UpdateGoal;
+        
+        default:
+          return null;
+      }
+    }).filter(Boolean) as UpdateItem[];
+
     return {
       items,
+      updates,
       message: parsed.message || "I've processed your input.",
       suggestions: parsed.suggestions,
       clarificationNeeded: parsed.clarificationNeeded || false,
       clarificationQuestion: parsed.clarificationQuestion,
+      schedulingCommand,
     };
   } catch (error) {
     console.error('Failed to parse AI response:', error);
     return {
       items: [],
+      updates: [],
       message: "I had trouble understanding that. Could you try rephrasing?",
       clarificationNeeded: true,
     };
@@ -515,6 +715,7 @@ export async function chatWithGemini(
     console.error('Gemini API key is missing or invalid');
     return {
       items: [],
+      updates: [],
       message: "API key not configured. Please add PUBLIC_GEMINI_API_KEY to your .env file and restart the server.",
       clarificationNeeded: true,
     };
@@ -581,6 +782,7 @@ export async function chatWithGemini(
         if (response.status === 400 && errorMessage.includes('API key')) {
           return {
             items: [],
+            updates: [],
             message: "Invalid API key. Please check your PUBLIC_GEMINI_API_KEY in the .env file.",
             clarificationNeeded: true,
           };
@@ -588,6 +790,7 @@ export async function chatWithGemini(
         if (response.status === 429) {
           return {
             items: [],
+            updates: [],
             message: "Rate limit exceeded. Please wait a moment and try again.",
             clarificationNeeded: true,
           };
@@ -607,6 +810,7 @@ export async function chatWithGemini(
       console.error('Empty response from Gemini:', data);
       return {
         items: [],
+        updates: [],
         message: "I received an empty response. Please try again.",
         clarificationNeeded: true,
       };
@@ -617,6 +821,7 @@ export async function chatWithGemini(
     console.error('Gemini chat error:', error);
     return {
       items: [],
+      updates: [],
       message: `Connection error: ${error instanceof Error ? error.message : 'Unknown error'}. Please check your internet connection and try again.`,
       clarificationNeeded: true,
     };

@@ -28,7 +28,13 @@ export interface UserSettings {
   notifications: NotificationSettings;
   workingHours: { start: string; end: string };
   workingDays: number[]; // 0 = Sunday, 1 = Monday, etc.
+  weeklyCapacity?: number; // Hours of work capacity per week
   timezone: string;
+  
+  // Energy-based scheduling
+  energyProfile?: 'morning-person' | 'night-owl' | 'steady';
+  peakEnergyHours?: { start: string; end: string }; // When you're most productive
+  lowEnergyHours?: { start: string; end: string }; // When you're in a slump
 }
 
 export interface NotificationSettings {

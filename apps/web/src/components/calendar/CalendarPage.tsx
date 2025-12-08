@@ -5,14 +5,25 @@ import { doc, getDoc } from 'firebase/firestore';
 import { subscribeToTasks } from '@/lib/db/tasks';
 import { subscribeToHabits } from '@/lib/db/habits';
 import { subscribeToMilestones } from '@/lib/db/milestones';
+import { subscribeToProjects } from '@/lib/db/projects';
 import { CalendarView } from './CalendarView';
 import { TimeBlockView } from './TimeBlockView';
+import { SchedulerControlCenter } from './SchedulerControlCenter';
 import { TaskModal } from '@/components/tasks/TaskModal';
 import { Button, Card } from '@/components/ui';
-import type { Task, Habit, HabitLog, UserSettings, Milestone } from '@totalis/shared';
-import type { SchedulePreview, WorkingSchedule } from '@/lib/ai/auto-scheduler';
+import type { Task, Habit, HabitLog, UserSettings, Milestone, Project } from '@totalis/shared';
+import type { LegacySchedulePreview as SchedulePreview, LegacyWorkingSchedule as WorkingSchedule, EnergyProfile } from '@/lib/scheduler/legacy-bridge';
 
 type ViewMode = 'month' | 'day';
+
+// Helper to convert Firebase Timestamp or Date to Date
+function toDate(value: any): Date | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) return value;
+  if (typeof value?.toDate === 'function') return value.toDate();
+  if (typeof value === 'string' || typeof value === 'number') return new Date(value);
+  return undefined;
+}
 
 // Schedule Preview Modal Component
 function SchedulePreviewModal({
@@ -275,6 +286,7 @@ export function CalendarPage() {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -288,12 +300,16 @@ export function CalendarPage() {
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [showUnscheduleModal, setShowUnscheduleModal] = useState(false);
   const [isUnscheduling, setIsUnscheduling] = useState(false);
+  const [showSchedulerControlCenter, setShowSchedulerControlCenter] = useState(false);
 
   // Working schedule (loaded from user settings)
   const [workingSchedule, setWorkingSchedule] = useState<WorkingSchedule>({
     days: [1, 2, 3, 4, 5], // Mon-Fri
     hours: { start: '09:00', end: '17:00' },
   });
+  
+  // Energy profile (loaded from user settings)
+  const [energyProfile, setEnergyProfile] = useState<EnergyProfile | undefined>();
 
   // Auth state listener
   useEffect(() => {
@@ -322,6 +338,15 @@ export function CalendarPage() {
             days: settings.workingDays || [1, 2, 3, 4, 5],
             hours: settings.workingHours || { start: '09:00', end: '17:00' },
           });
+          
+          // Load energy profile
+          if (settings.energyProfile) {
+            setEnergyProfile({
+              type: settings.energyProfile as 'morning-person' | 'night-owl' | 'steady',
+              peakHours: settings.peakEnergyHours || { start: '09:00', end: '12:00' },
+              lowEnergyHours: settings.lowEnergyHours || { start: '14:00', end: '16:00' },
+            });
+          }
         }
       } catch (error) {
         console.error('Failed to load settings:', error);
@@ -352,6 +377,10 @@ export function CalendarPage() {
     const unsubMilestones = subscribeToMilestones(user.uid, (updatedMilestones) => {
       setMilestones(updatedMilestones);
     });
+    
+    const unsubProjects = subscribeToProjects(user.uid, (updatedProjects) => {
+      setProjects(updatedProjects);
+    });
 
     // TODO: Load habit logs for visible date range
     // For now, we'll just use empty array
@@ -360,6 +389,7 @@ export function CalendarPage() {
       unsubTasks();
       unsubHabits();
       unsubMilestones();
+      unsubProjects();
     };
   }, [user, authChecked]);
 
@@ -370,7 +400,8 @@ export function CalendarPage() {
 
   const handleDayClick = (date: Date) => {
     setSelectedDate(date);
-    setViewMode('day');
+    // Don't auto-switch to day view - let user see due task details in month view first
+    // User can manually switch to day view if they want TimeBlockView
   };
 
   const handleCreateTask = (scheduledStart: Date) => {
@@ -385,7 +416,7 @@ export function CalendarPage() {
   const handleUpdateTask = async (taskData: Partial<Task>) => {
     // Convert Date objects to Firestore Timestamps
     const { Timestamp } = await import('firebase/firestore');
-    const cleanData = { ...taskData };
+    const cleanData: Record<string, any> = { ...taskData };
     
     if (cleanData.scheduledStart instanceof Date) {
       cleanData.scheduledStart = Timestamp.fromDate(cleanData.scheduledStart);
@@ -411,7 +442,7 @@ export function CalendarPage() {
   const handleTimeBlockUpdate = async (taskId: string, updates: Partial<Task>) => {
     // Convert Date objects to Firestore Timestamps
     const { Timestamp } = await import('firebase/firestore');
-    const cleanData = { ...updates };
+    const cleanData: Record<string, any> = { ...updates };
     
     if (cleanData.scheduledStart instanceof Date) {
       cleanData.scheduledStart = Timestamp.fromDate(cleanData.scheduledStart);
@@ -429,6 +460,73 @@ export function CalendarPage() {
     await deleteTask(taskId);
   };
 
+  // Handle quick scheduling of a single task from CalendarView
+  const handleScheduleTask = async (task: Task, preferredDate?: Date) => {
+    const { Timestamp } = await import('firebase/firestore');
+    const { updateTask } = await import('@/lib/db/tasks');
+    
+    if (preferredDate) {
+      // Schedule for the specific date at 9am (or first available time)
+      const scheduleTime = new Date(preferredDate);
+      scheduleTime.setHours(9, 0, 0, 0);
+      
+      await updateTask(task.id, {
+        scheduledStart: Timestamp.fromDate(scheduleTime) as any,
+      });
+      console.log(`✅ Scheduled "${task.title}" for ${scheduleTime.toLocaleString()}`);
+    } else {
+      // Auto-schedule using smart scheduler for optimal day
+      try {
+        const { generateSmartSchedule, applySchedulePreview, getDefaultSchedulerConfig } = await import('@/lib/scheduler/legacy-bridge');
+        
+        // Get config with deadlines-first approach
+        const config = getDefaultSchedulerConfig();
+        config.startDate = new Date();
+        
+        const endDate = new Date();
+        endDate.setDate(endDate.getDate() + 30); // Look 30 days ahead
+        config.endDate = endDate;
+        
+        // If task has a due date, prioritize scheduling before it
+        if (task.dueDate) {
+          const dueDate = toDate(task.dueDate);
+          if (dueDate) {
+            config.endDate = new Date(Math.min(dueDate.getTime(), endDate.getTime()));
+          }
+        }
+        
+        const previews = await generateSmartSchedule(
+          [task], // Just this one task
+          config,
+          workingSchedule,
+          milestones,
+          habits
+        );
+        
+        if (previews.length > 0) {
+          await applySchedulePreview(previews[0]);
+          console.log(`✅ Auto-scheduled "${task.title}"`);
+        } else {
+          // Fallback: schedule for today
+          const now = new Date();
+          now.setHours(9, 0, 0, 0);
+          await updateTask(task.id, {
+            scheduledStart: Timestamp.fromDate(now) as any,
+          });
+          console.log(`✅ Fallback scheduled "${task.title}" for today`);
+        }
+      } catch (error) {
+        console.error('Auto-schedule failed:', error);
+        // Fallback: schedule for today at 9am
+        const now = new Date();
+        now.setHours(9, 0, 0, 0);
+        await updateTask(task.id, {
+          scheduledStart: Timestamp.fromDate(now) as any,
+        });
+      }
+    }
+  };
+
   const handleAutoSchedule = async (mode: 'day' | 'week' = 'day') => {
     if (!user) return;
     
@@ -437,12 +535,12 @@ export function CalendarPage() {
     try {
       if (mode === 'day') {
         // Import AI scheduler
-        const { generateSchedulePreview } = await import('@/lib/ai/auto-scheduler');
+        const { generateSchedulePreview } = await import('@/lib/scheduler/legacy-bridge');
         
         // Get unscheduled tasks for the selected date
         const dateStr = selectedDate.toISOString().split('T')[0];
         const unscheduledTasks = tasks.filter(t => {
-          const dueDate = t.dueDate instanceof Date ? t.dueDate : t.dueDate?.toDate?.();
+          const dueDate = toDate(t.dueDate);
           if (!dueDate) return false;
           return dueDate.toISOString().split('T')[0] === dateStr && !t.scheduledStart;
         });
@@ -463,7 +561,7 @@ export function CalendarPage() {
           const tasksToSchedule = allUnscheduled.slice(0, 10);
           
           const scheduledTasks = tasks.filter(t => {
-            const startDate = t.scheduledStart instanceof Date ? t.scheduledStart : t.scheduledStart?.toDate?.();
+            const startDate = toDate(t.scheduledStart);
             if (!startDate) return false;
             return startDate.toISOString().split('T')[0] === dateStr;
           });
@@ -479,7 +577,7 @@ export function CalendarPage() {
         } else {
           // Get already scheduled tasks for capacity check
           const scheduledTasks = tasks.filter(t => {
-            const startDate = t.scheduledStart instanceof Date ? t.scheduledStart : t.scheduledStart?.toDate?.();
+            const startDate = toDate(t.scheduledStart);
             if (!startDate) return false;
             return startDate.toISOString().split('T')[0] === dateStr;
           });
@@ -495,7 +593,7 @@ export function CalendarPage() {
         }
       } else {
         // Week scheduling
-        const { generateWeekSchedulePreview } = await import('@/lib/ai/auto-scheduler');
+        const { generateWeekSchedulePreview } = await import('@/lib/scheduler/legacy-bridge');
         
         // Start from today or selected date
         const startDate = new Date(selectedDate);
@@ -529,7 +627,7 @@ export function CalendarPage() {
     setIsScheduling(true);
     
     try {
-      const { generateMonthSchedulePreview } = await import('@/lib/ai/auto-scheduler');
+      const { generateMonthSchedulePreview } = await import('@/lib/scheduler/legacy-bridge');
       
       // Start from today
       const startDate = new Date();
@@ -557,6 +655,69 @@ export function CalendarPage() {
     }
   };
 
+  // Handler to schedule only tasks with due dates
+  const handleScheduleDueTasks = async () => {
+    if (!user) return;
+    
+    // Get all unscheduled tasks with due dates
+    const dueTasks = tasks.filter(t => 
+      t.dueDate && !t.scheduledStart && t.status !== 'completed'
+    );
+    
+    if (dueTasks.length === 0) {
+      alert('No unscheduled tasks with due dates found!');
+      return;
+    }
+    
+    if (!confirm(`Schedule ${dueTasks.length} task(s) with due dates? They will be scheduled with buffer time before their deadlines.`)) {
+      return;
+    }
+    
+    setIsScheduling(true);
+    
+    try {
+      const { generateSmartSchedule, getDefaultSchedulerConfig, applySchedulePreview } = await import('@/lib/scheduler/legacy-bridge');
+      
+      const config = getDefaultSchedulerConfig(workingSchedule);
+      config.startDate = new Date();
+      
+      // Set end date to furthest due date + 7 days for safety
+      const furthestDue = dueTasks.reduce((max, t) => {
+        const due = toDate(t.dueDate);
+        return due && due > max ? due : max;
+      }, new Date());
+      const endDate = new Date(furthestDue);
+      endDate.setDate(endDate.getDate() + 7);
+      config.endDate = endDate;
+      
+      // Prioritize deadlines
+      config.strictDeadlines = true;
+      config.deadlineBufferDays = 2;
+      
+      const previews = await generateSmartSchedule(
+        dueTasks, // Only tasks with due dates
+        config,
+        workingSchedule,
+        milestones,
+        habits
+      );
+      
+      if (previews.length === 0) {
+        alert('Could not schedule any due tasks. Check if there is enough capacity.');
+        setIsScheduling(false);
+        return;
+      }
+      
+      // Show preview
+      setSchedulePreview(previews);
+    } catch (error) {
+      console.error('Schedule due tasks failed:', error);
+      alert('Failed to schedule due tasks. Please try again.');
+    } finally {
+      setIsScheduling(false);
+    }
+  };
+
   const handleAutoScheduleYear = async () => {
     if (!user) return;
     
@@ -567,7 +728,7 @@ export function CalendarPage() {
     setIsScheduling(true);
     
     try {
-      const { generateYearSchedulePreview } = await import('@/lib/ai/auto-scheduler');
+      const { generateYearSchedulePreview } = await import('@/lib/scheduler/legacy-bridge');
       
       // Start from today
       const startDate = new Date();
@@ -611,11 +772,11 @@ export function CalendarPage() {
     
     try {
       if (mode === 'day') {
-        const { rescheduleDay } = await import('@/lib/ai/auto-scheduler');
+        const { rescheduleDay } = await import('@/lib/scheduler/legacy-bridge');
         const preview = await rescheduleDay(tasks, selectedDate, workingSchedule);
         setSchedulePreview([preview]);
       } else if (mode === 'week') {
-        const { rescheduleWeek } = await import('@/lib/ai/auto-scheduler');
+        const { rescheduleWeek } = await import('@/lib/scheduler/legacy-bridge');
         const startDate = new Date(selectedDate);
         // Find start of week (Monday)
         const day = startDate.getDay();
@@ -631,7 +792,7 @@ export function CalendarPage() {
         }
         setSchedulePreview(previews);
       } else if (mode === 'month') {
-        const { rescheduleMonth } = await import('@/lib/ai/auto-scheduler');
+        const { rescheduleMonth } = await import('@/lib/scheduler/legacy-bridge');
         const startDate = new Date();
         startDate.setDate(1);
         startDate.setHours(0, 0, 0, 0);
@@ -645,7 +806,7 @@ export function CalendarPage() {
         setSchedulePreview(previews);
       } else {
         // Year mode - reschedule all months
-        const { generateYearSchedulePreview } = await import('@/lib/ai/auto-scheduler');
+        const { generateYearSchedulePreview } = await import('@/lib/scheduler/legacy-bridge');
         const startDate = new Date();
         startDate.setMonth(0);
         startDate.setDate(1);
@@ -676,7 +837,7 @@ export function CalendarPage() {
     setIsUnscheduling(true);
     
     try {
-      const { unscheduleAllTasks } = await import('@/lib/ai/auto-scheduler');
+      const { unscheduleAllTasks } = await import('@/lib/scheduler/legacy-bridge');
       const count = await unscheduleAllTasks(tasks, scope);
       setShowUnscheduleModal(false);
       alert(`✅ Unscheduled ${count} task${count !== 1 ? 's' : ''}!`);
@@ -694,7 +855,7 @@ export function CalendarPage() {
     setIsApplyingSchedule(true);
     
     try {
-      const { applySchedulePreview } = await import('@/lib/ai/auto-scheduler');
+      const { applySchedulePreview } = await import('@/lib/scheduler/legacy-bridge');
       
       for (const preview of schedulePreview) {
         await applySchedulePreview(preview);
@@ -767,73 +928,15 @@ export function CalendarPage() {
         
         {/* View Mode Toggle */}
         <div className="flex gap-2 flex-wrap justify-end">
-          {viewMode === 'day' && (
-            <>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => handleAutoSchedule('day')}
-                disabled={isScheduling}
-              >
-                {isScheduling ? '⏳...' : '🤖 Schedule Day'}
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => handleReschedule('day')}
-                disabled={isScheduling}
-              >
-                🔄 Reschedule Day
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => handleReschedule('week')}
-                disabled={isScheduling}
-              >
-                🔄 Reschedule Week
-              </Button>
-              <div className="w-px bg-border mx-1" />
-            </>
-          )}
-          {viewMode === 'month' && (
-            <>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={handleAutoScheduleMonth}
-                disabled={isScheduling}
-              >
-                {isScheduling ? '⏳ Generating...' : '📆 Schedule Month'}
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={handleAutoScheduleYear}
-                disabled={isScheduling}
-              >
-                📅 Schedule Year
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => setShowRescheduleModal(true)}
-                disabled={isScheduling}
-              >
-                🔄 Reschedule...
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => setShowUnscheduleModal(true)}
-                disabled={isScheduling || isUnscheduling}
-                className="!text-red-500 hover:!bg-red-50 dark:hover:!bg-red-900/20"
-              >
-                🗑️ Unschedule...
-              </Button>
-              <div className="w-px bg-border mx-1" />
-            </>
-          )}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setShowSchedulerControlCenter(true)}
+            disabled={isScheduling}
+          >
+            🧠 Smart Scheduler
+          </Button>
+          <div className="w-px bg-border mx-1" />
           <Button
             variant={viewMode === 'month' ? 'primary' : 'secondary'}
             size="sm"
@@ -860,6 +963,7 @@ export function CalendarPage() {
           workingHours={workingSchedule.hours}
           onDayClick={handleDayClick}
           onTaskClick={handleTaskClick}
+          onScheduleTask={handleScheduleTask}
         />
       ) : (
         <TimeBlockView
@@ -911,6 +1015,22 @@ export function CalendarPage() {
           isLoading={isUnscheduling}
         />
       )}
+      
+      {/* Smart Scheduler Control Center */}
+      <SchedulerControlCenter
+        isOpen={showSchedulerControlCenter}
+        onClose={() => setShowSchedulerControlCenter(false)}
+        tasks={tasks}
+        projects={projects}
+        milestones={milestones}
+        habits={habits}
+        workingSchedule={workingSchedule}
+        energyProfile={energyProfile}
+        onScheduleApplied={() => {
+          // Refresh will happen automatically via subscriptions
+          setShowSchedulerControlCenter(false);
+        }}
+      />
     </div>
   );
 }
